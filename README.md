@@ -64,71 +64,54 @@ AI 自主渗透测试系统（Go 后端 + Next.js 前端）
 
 ## 安装
 
-> 依赖数据库 **PostgreSQL**；探索需配置 **LLM**（`ANTHROPIC_API_KEY` 或 `OPENAI_API_KEY`，也可在 UI 里配）。
+ARTEX 原生运行，连接本机或外部管理的 **PostgreSQL**。请先准备数据库及访问账号，并允许该账号创建、迁移应用表。将连接信息写入 `config.json` 或设置 `ARTEX_PG_DSN`。使用 Agent 前，在 UI 中配置 LLM，或通过进程环境设置 `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`。
 
-### 方式一：一键安装脚本（推荐）
+新安装时，从 `config.example.json` 创建配置并填写数据库连接。已有部署直接沿用现有配置，可用 `ARTEX_CONFIG` 指定配置文件路径。`skill_dir` 留空时，ARTEX 使用可执行文件同级的 `skills/`。
+
+### 方式一：安装脚本（Linux / macOS）
+
+需要 Go 1.26.3 或更高版本，构建前端需要 Node.js 22 和 npm。
 
 ```bash
-git clone https://github.com/Hinln/ARTEX.git
+git clone https://github.com/Clementine-Miles/ARTEX.git
 cd ARTEX
-./install.sh
+test -e config.json || (umask 077; cp config.example.json config.json)
+# 编辑 config.json，填写已有 PostgreSQL 的连接信息
+./install.sh -addr 127.0.0.1:8787
 ```
 
-脚本会：检测 / 自动安装 Docker → 让你选 **① 全部 Docker** 或 **② 本地编译运行**：
+如已设置 `ARTEX_PG_DSN`，可以跳过创建 `config.json`。脚本构建二进制并调用 `start.sh`，在检测到 npm 时同时构建并嵌入前端。使用内嵌前端时，打开 **http://localhost:8787**，首次访问 `/setup` 设置管理员密码。只构建后端时，可另开终端，在具备 Node.js 和 npm 的环境中运行 `cd web && npm ci && npm run dev -- --hostname 127.0.0.1`，再打开前端终端显示的地址。
 
-- **① 全部 Docker**：填一个 Postgres 密码（可回车随机）→ 自动写 `.env` → `docker compose up -d`。
-- **② 本地运行**：选数据库（连已有 / 用 Docker 起一个）→ 生成 `config.json` → `go` 编译内嵌单二进制 → 启动。
+### 方式二：使用预编译二进制（Releases）
 
-装好后打开 **http://localhost:8787**（首次进入 `/setup` 设置管理员密码）。
-
-### 方式二：Docker Compose（手动）
+如果此仓库已发布[预编译包](https://github.com/Clementine-Miles/ARTEX/releases)，下载对应平台的 zip 并按 `SHA256SUMS` 核对压缩包。解压后配置 PostgreSQL，再运行随包提供的启动脚本。
 
 ```bash
-git clone https://github.com/Hinln/ARTEX.git
-cd ARTEX
-cp .env.example .env          # 填 POSTGRES_PASSWORD、可选 ANTHROPIC_API_KEY
-docker compose up -d          # 拉取 autumn27/artex 镜像 + postgres
-# → http://localhost:8787
+test -e config.json || (umask 077; cp config.example.json config.json)
+# 编辑 config.json，填写已有 PostgreSQL 的连接信息
+./start.sh -addr 127.0.0.1:8787
 ```
 
-镜像已含常用工具（ripgrep/curl/vim/npm/nmap…）；`./skills` 与 `./data` 以绑定挂载持久化。
+Windows 用户可将 `config.example.json` 复制为 `config.json`，填写数据库连接后运行 `start.bat -addr 127.0.0.1:8787`。启动脚本根据程序退出码决定是否重启，并负责完成[页面一键更新](#方式一页面一键更新)和回滚。需要后台运行时，可以将启动脚本交给系统服务管理器。
 
-远程 MCP 可在系统设置中选择 `http`（Streamable HTTP）或 `sse`（旧版 SSE）。
-旧版 SSE 服务通常使用 `GET /sse` 建立事件流，再通过服务返回的
-`/message?sessionId=...` 接收 JSON-RPC 请求；配置时将 URL 填为 `/sse`，请求头按
-`Authorization=Bearer <token>` 填写。
+### 方式三：从源码编译单二进制
 
-### 方式三：下载预编译二进制（Releases）
-
-到 [Releases](https://github.com/Hinln/ARTEX/releases) 下载对应平台的 zip，解压后得到 `artex` + `start.sh`（Windows 为 `start.bat`）+ `skills/` + `config.example.json`：
+先配置 PostgreSQL，再在项目根目录运行以下命令。
 
 ```bash
-cp config.example.json config.json   # 填好 database 连接
-./start.sh                           # → http://localhost:8787
+ARTEX_OUTPUT=./artex ./build.sh
+./start.sh -addr 127.0.0.1:8787
 ```
 
-> 请用 `start.sh` / `start.bat` 启动，而不是直接跑 `./artex`。它是个守护脚本：程序退出后按退出码决定是否重新拉起，**页面上的[一键更新](#方式一页面一键更新推荐)靠它完成换装**。直接运行 `./artex` 时更新完就不会被拉起了。
-> 后台常驻：`nohup ./start.sh >artex.log 2>&1 &`。
+构建需要 Go 1.26.3 或更高版本、Node.js 22、npm 和 `rsync`。ARTEX 在宿主机查找外部工具。按已启用的 Skill 或 MCP 配置安装所需工具，并将可执行文件放入 ARTEX 进程的 `PATH`。
 
-### 方式四：从源码编译单二进制
-
-```bash
-# 1) 前端静态导出
-cd web && npm ci && npm run build:static && cd ..
-# 2) 拷进内嵌目录
-cp -r web/out server/webui/dist
-# 3) 编译（-tags embedui 才内嵌前端）
-CGO_ENABLED=0 go build -tags embedui -o artex ./cmd/artex
-./start.sh
-```
-
-### 方式五：构建跨平台 Release 压缩包
+### 方式四：构建跨平台 Release 压缩包
 
 `build.sh` 会先构建并嵌入前端，再使用 Go linker 去除调试信息，并将发布文件压缩为 zip。Release 模式默认生成 Linux amd64/arm64、macOS amd64/arm64 和 Windows amd64 的 zip 包：
 
 ```bash
 ./build.sh --release
-# 产物：dist/artex-0.3.3-*.zip
+# 产物为 dist/artex-<版本>-<系统>-<架构>.zip 和 dist/SHA256SUMS
 ```
 
 UPX 自解压二进制可能与部分 Linux 内核、虚拟化环境或安全策略不兼容，因此默认不启用。可用 `ARTEX_TARGETS` 自定义目标；确认目标运行环境兼容时，可显式传入 `--upx` 进一步缩小二进制：
@@ -142,24 +125,17 @@ ARTEX_TARGETS=linux/amd64,windows/amd64 ./build.sh --release
 
 ## 更新升级
 
-> 升级只换程序、不动数据：Postgres 数据卷 `pgdata`、`./data`（jwt.key / SQLite 等）、`./skills` 都会保留。**数据库迁移无需手动执行**——`artex` 每次启动会幂等重跑 `schema.sql`（含 `ADD COLUMN` / `CREATE INDEX IF NOT EXISTS`），即“重启即迁移”。升级前仍建议先备份 `./data` 与数据库。
+升级前请备份 PostgreSQL、`config.json`、`data/`、`jwt.key` 和 `skills/`，或对应的自定义路径。重启时 ARTEX 会自动应用数据库 schema 迁移。若需切换数据库实例，请先将旧库导出并恢复到新实例，再更新连接配置。沿用原有的数据与 Skill 目录可保留工作区和用户安装的 Skill。
 
-### 本仓库的私有 Release 更新源
+### 页面更新源
 
-页面一键更新固定从 [Hinln/ARTEX Releases](https://github.com/Hinln/ARTEX/releases) 检查和下载版本。克隆或通过 Git 更新源码也使用 `Hinln/ARTEX`；原项目的 Go module 路径保持不变。
+页面一键更新的代码固定从 [Hinln/ARTEX Releases](https://github.com/Hinln/ARTEX/releases) 检查和下载版本。从 `Clementine-Miles/ARTEX` 构建的正式版本也使用该来源。若要安装当前仓库发布的版本，请按下文手动安装预编译包或从源码更新。
 
-这是私有仓库。请为运行 ARTEX 的后端进程设置 `ARTEX_UPDATE_GITHUB_TOKEN`，令牌只需本仓库的 **Contents: read** 权限。令牌由后端用于查询 Release 和下载附件，不发送给浏览器，也不要提交到 Git。
+如果更新源为私有仓库，请在 ARTEX 后端进程环境中设置 `ARTEX_UPDATE_GITHUB_TOKEN`，向令牌授予 `Hinln/ARTEX` 仓库的 **Contents 读取**权限。后端使用令牌查询 Release 和下载附件。`.env.example` 列出了可用的环境变量，启动脚本从进程环境读取变量。
 
-```bash
-# 先在当前 shell 或服务环境中安全设置 ARTEX_UPDATE_GITHUB_TOKEN
-./start.sh
-```
+页面更新需要更新源发布正式版本，并附上 `artex-<版本>-<os>-<arch>.zip` 和 `SHA256SUMS`。当前仓库的 Release 工作流在推送 `v*` tag 时为当前仓库生成这些附件。
 
-本地直接启动时，`start.sh` 不会自动读取 `.env`；必须将变量导出到进程环境。Docker Compose 部署则可在未纳入 Git 的 `.env` 中填写该变量，并重建 artex 容器；镜像需要包含本分支的更新代码，旧版镜像不会因此切换升级源。
-
-需要先在本仓库发布非 draft、非 prerelease 的正式 Release，并附上 `artex-<版本>-<os>-<arch>.zip` 和 `SHA256SUMS`，页面才能提供可安装更新。仓库里只有源码时还不能在线升级。现有 Release 工作流会在推送 `v*` tag 时为当前仓库生成这些附件。
-
-### 方式一：页面一键更新（推荐）
+### 方式一：页面一键更新
 
 在 **系统配置** 页（侧边栏「系统配置」→ `/system/settings`）的**版本与更新**卡片里，可以直接检查并安装新版本，无需登录服务器。
 
@@ -169,7 +145,6 @@ ARTEX_TARGETS=linux/amd64,windows/amd64 ./build.sh --release
 - **随时可回退**：上一版本保留为 `artex.old`，卡片上有「回滚到上一版本」。注意数据库结构不会回退。
 - **更新会中断正在运行的任务**——更新即重启，请在空闲时进行。
 - **开发构建不给更新**：版本号是 `dev` 或 `git describe` 带后缀时禁用，避免正式版覆盖掉本地调试的二进制。
-- **Docker 下只换程序、不换镜像**：镜像里的 playwright / nmap 等工具链不会跟着升级，且 `docker compose up -d` 重建容器后会退回镜像自带的版本。要连镜像一起升级仍请用 `docker compose pull artex && docker compose up -d artex`。
 - 访问 GitHub 需要代理时，在同一页面配置**全局代理**即可，更新链路会走它。更新只从 GitHub 域名下载并强制 HTTPS。
 
 ### 方式二：一键更新脚本
@@ -179,39 +154,17 @@ cd ARTEX
 ./update.sh
 ```
 
-脚本先可选 `git pull` 拉取最新代码，再让你选 **① Docker 更新** 或 **② 本地编译更新**（与 `install.sh` 对应）：
+脚本默认从当前工作树重建二进制。运行 `./update.sh --pull` 可先快进合并 Git 上游再构建。完成后，请停止当前进程并通过 `start.sh` 重新启动。
 
-- **① Docker**：可指定目标镜像 tag（回车沿用 `.env` 的 `ARTEX_TAG`，缺省 `latest`）→ `docker compose pull` → `docker compose up -d`（换新镜像重启即自动迁移）。
-- **② 本地**：重建前端静态产物 → 重新编译 `./artex`（完成后重启进程生效）。
+### 方式三：预编译二进制（Releases）
 
-### 方式三：Docker Compose（手动）
+从[当前仓库的 Releases](https://github.com/Clementine-Miles/ARTEX/releases) 获取对应平台的发布包并校验 `SHA256SUMS`。停止服务，备份现有二进制，再将新二进制复制到原位置并重启。如果需要新版附带的 Skill，请逐项合并到已有 `skills/`，保留自定义文件。
 
-```bash
-cd ARTEX
-git pull                       # 更新 compose / 脚本（可选）
-# 指定版本：在 .env 设 ARTEX_TAG=v0.2.0；不设则用 latest
-docker compose pull artex
-docker compose up -d artex     # 换新镜像重启 → 自动迁移 schema
-docker image prune -f          # 清理旧镜像（可选）
-```
-
-### 方式四：预编译二进制（Releases）
-
-到 [Releases](https://github.com/Hinln/ARTEX/releases) 下载新版本 zip，停掉旧进程后覆盖 `artex` 与 `skills/`（保留你的 `config.json` 与 `data/`），重启即可：
+### 方式四：从源码编译
 
 ```bash
-cp -r <解压目录>/skills ./ && cp <解压目录>/artex ./
-./start.sh
-```
-
-### 方式五：从源码编译
-
-```bash
-git pull
-cd web && npm ci && npm run build:static && cd ..
-cp -r web/out server/webui/dist
-CGO_ENABLED=0 go build -tags embedui -o artex ./cmd/artex
-# 重启 ./start.sh
+ARTEX_OUTPUT=./artex ./build.sh
+# 停止当前进程后，按原有参数重新运行 ./start.sh
 ```
 
 ---
@@ -235,11 +188,13 @@ CGO_ENABLED=0 go build -tags embedui -o artex ./cmd/artex
 
 **并发**：每个任务的 work agent 数在「系统设置」里配置（默认 3）。
 
-**常用参数**：`./start.sh -addr :8787 -proxy :8788`（`-addr` 前端+API，`-proxy` 流量录制代理）。启动脚本会把参数原样透传给 `artex`。
+**常用参数** `./start.sh -addr 127.0.0.1:8787 -proxy 127.0.0.1:8788`。`-addr` 设置前端和 API 监听地址（默认 `:8787`），`-proxy` 设置流量录制代理地址（默认 `127.0.0.1:8788`，设为空可停用）。启动脚本会将参数传给 `artex`。
+
+**远程 MCP** 可在系统设置中选择 `http`（Streamable HTTP）或 `sse`（旧版 SSE）。旧版 SSE 的 URL 通常以 `/sse` 结尾，服务在事件流中公布接收 JSON-RPC 的地址。可为可信 MCP 服务配置请求头，例如 `Authorization=Bearer <token>`。
 
 ### 反向代理部署（HTTPS / 只开放 443）
 
-前端和 API/SSE 都由同一个后端端口（默认 `:8787`）提供，实时活动流默认走**同源**地址，因此**无需配置 `NEXT_PUBLIC_SSE_BASE`**，公网只开放 443、把 8787 留在内网即可。
+用 `-addr 127.0.0.1:8787` 启动 ARTEX，由同一台主机的反向代理对外提供 HTTPS。前端与 API/SSE 共用该后端端口，实时活动流默认使用页面的同源地址。
 
 SSE 是长连接 + 持续推送，反代**必须关闭缓冲**，否则浏览器能连上却收不到事件（表现为活动流一直转圈）。Nginx 示例：
 
@@ -264,7 +219,7 @@ server {
 }
 ```
 
-> 仅当 SSE 需要走与页面不同的来源（如独立子域）时，才在**构建期**设置 `NEXT_PUBLIC_SSE_BASE`（该变量在 `next build` 时固化进静态包，容器运行时再设无效）。
+> 当 SSE 使用不同来源（如独立子域）时，在 `next build` 前设置 `NEXT_PUBLIC_SSE_BASE`。该值会写入静态包。
 
 ---
 

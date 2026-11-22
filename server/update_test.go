@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -151,5 +152,28 @@ func TestReleaseCacheDoesNotPoisonOnCallerCancel(t *testing.T) {
 	}
 	if rel == nil || rel.TagName != "v0.3.8" {
 		t.Fatalf("应拿到正常结果，得到 %+v", rel)
+	}
+}
+
+func TestUpdateRoutesRequireAuthentication(t *testing.T) {
+	handler := (&Server{}).Handler()
+	routes := []struct {
+		path   string
+		method string
+	}{
+		{"/api/update/check", http.MethodGet},
+		{"/api/update/apply", http.MethodPost},
+		{"/api/update/rollback", http.MethodPost},
+		{"/api/update/stream", http.MethodGet},
+	}
+	for _, route := range routes {
+		t.Run(route.path, func(t *testing.T) {
+			req := httptest.NewRequest(route.method, route.path, nil)
+			resp := httptest.NewRecorder()
+			handler.ServeHTTP(resp, req)
+			if resp.Code != http.StatusUnauthorized {
+				t.Fatalf("status = %d, want %d", resp.Code, http.StatusUnauthorized)
+			}
+		})
 	}
 }

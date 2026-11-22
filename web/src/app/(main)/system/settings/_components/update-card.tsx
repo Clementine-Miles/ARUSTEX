@@ -19,8 +19,7 @@ import { Progress } from "@/components/ui/progress";
 import { api, sseUrl } from "@/lib/api";
 import type { UpdateCheck, UpdateProgress } from "@/lib/types";
 
-/** 等待新版本上线的最长时间。一次升级要经过三次进程启动（暂存 → 换装 → 新版），
- *  每次都是秒级，三分钟足够覆盖慢磁盘和 Docker 容器重建。 */
+/** 等待守护脚本完成换装并启动新版本的最长时间。 */
 const RESTART_TIMEOUT_MS = 180_000;
 
 function humanSize(n?: number): string {
@@ -133,14 +132,7 @@ export function UpdateCard() {
   const doUpdate = () => {
     if (!info) return;
     const from = info.current;
-    const ok = window.confirm(
-      `确定更新到 ${info.latest}？\n\n` +
-        "更新会重启程序，正在运行的任务会被中断。\n" +
-        (info.mode === "docker"
-          ? "\n注意：容器内更新只替换程序本身，不会更新镜像里的 playwright / nmap 等工具链；" +
-            "若新版本依赖新工具，请改用 docker compose pull。"
-          : ""),
-    );
+    const ok = window.confirm(`确定更新到 ${info.latest}？\n\n更新会重启程序，正在运行的任务会被中断。`);
     if (!ok) return;
 
     setBusy(true);
@@ -200,12 +192,9 @@ export function UpdateCard() {
             {info?.current ?? "…"}
           </Badge>
           {info && (
-            <>
-              <Badge variant="outline" className="font-mono">
-                {info.os}/{info.arch}
-              </Badge>
-              <Badge variant="outline">{info.mode === "docker" ? "Docker" : "独立程序"}</Badge>
-            </>
+            <Badge variant="outline" className="font-mono">
+              {info.os}/{info.arch}
+            </Badge>
           )}
           {info?.latest && (
             <>
@@ -262,15 +251,6 @@ export function UpdateCard() {
           <p className="flex items-center gap-2 text-xs text-muted-foreground">
             <CheckCircle2Icon className="size-3.5 text-emerald-600" />
             当前已是最新版本。
-          </p>
-        )}
-
-        {info?.mode === "docker" && info.has_update && (
-          <p className="text-xs text-muted-foreground">
-            Docker 下的更新只替换程序本身，不更新镜像里的 playwright / nmap 等工具链，且
-            <span className="font-mono"> docker compose up -d </span>
-            重建容器后会退回镜像自带的版本。需要连镜像一起升级请执行
-            <span className="font-mono"> docker compose pull artex &amp;&amp; docker compose up -d artex</span>。
           </p>
         )}
 

@@ -149,7 +149,7 @@ export async function http<T>(path: string, init?: RequestInit): Promise<T> {
 
 // sseUrl builds a URL for Server-Sent Events streams.
 //
-// Production (static export / Docker): the Go backend serves the web UI *and* the
+// Production (static export): the Go backend serves the web UI *and* the
 // SSE streams on the same port, so we default to a same-origin (relative) URL.
 // This is what makes reverse-proxy deploys work: a page loaded from
 // https://<domain>/ connects to https://<domain>/api/..., which the proxy forwards
