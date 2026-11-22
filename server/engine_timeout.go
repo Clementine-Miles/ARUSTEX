@@ -12,18 +12,17 @@ import (
 	"github.com/Autumn-27/artex/db"
 )
 
-// 任务级超时协调器(见 docs/任务级超时与收尾设计.md §4/§8.5)。
-// 绝对墙钟:每个带 timeout 的任务一个定时 goroutine,到点驱动有序收尾时序:
-//   ① settling → ② worker 停领新意图 / ③ planner 丢弃普通 notify
-//   ④ 等在跑 worker drain(受 grace) → ⑤ 终局一轮 planner 判定 → ⑥ 定终态(带守卫)
+// One goroutine per timed task enforces the wall-clock deadline. On expiry, enter wrap-up, stop
+// normal dispatch and planner wakeups, drain active runs within the grace period, then run final
+// planning and persist the terminal state.
 
 const (
-	settleDrainGrace     = 90 * time.Second // 等在跑 worker 优雅收尾的上限;超过则硬 cancel
-	deadlinePollInterval = 2 * time.Second  // deadline 未盖章/LLM 未就绪时的轮询间隔
-	deadlineMaxSleep     = 30 * time.Second // 单次最长睡眠(便于周期复查终态)
+	settleDrainGrace     = 90 * time.Second // Grace period for active workers before hard cancellation.
+	deadlinePollInterval = 2 * time.Second  // Polling interval while waiting for the deadline or LLM readiness.
+	deadlineMaxSleep     = 30 * time.Second // Maximum sleep before checking terminal state again.
 )
 
-// ---------- settling 状态 ----------
+// Wrap-up state.
 
 func (e *Engine) isSettling(taskID string) bool {
 	v, _ := e.settling.Load(taskID)
@@ -37,7 +36,7 @@ func (e *Engine) markSettling(taskID string) bool {
 	return !loaded
 }
 
-// ---------- 在跑计数(worker.Execute + planner.Plan),用于 drain ----------
+// In-flight planner and worker counts for draining the task.
 
 func (e *Engine) inflightCounter(taskID string) *int64 {
 	v, _ := e.inflight.LoadOrStore(taskID, new(int64))
@@ -103,7 +102,7 @@ func (e *Engine) stampFirstRun(t *Task) {
 	dl, err := e.m.StampTaskFirstRun(t.ID)
 	if err != nil {
 		log.Printf("[deadline] task %s 盖章 first_run 失败: %v", t.ID, err)
-		e.stamped.Delete(t.ID) // 允许下次重试
+		e.stamped.Delete(t.ID) // Allow a later attempt.
 		return
 	}
 	if dl > 0 {
@@ -123,7 +122,7 @@ func (e *Engine) clockCtx(base context.Context, t *Task, final bool) context.Con
 	return agent.WithTaskClock(base, agent.TaskClock{DeadlineUnix: dl, Final: final})
 }
 
-// ---------- 协调器 ----------
+// Deadline coordinator.
 
 // startDeadlineCoordinator launches the per-task deadline timer once (idempotent).
 // Called from Run() and from the restart reload path, so non-active timeout tasks
@@ -187,30 +186,30 @@ func (e *Engine) settleTask(ctx context.Context, t *Task) {
 	}
 	log.Printf("[deadline] task %s 到达超时上限,进入收尾时序", t.ID)
 
-	// ④ 等在跑 worker/planner drain(在跑 run 因夹逼的 MaxDuration 自行进收尾);
-	// 超过 grace 仍未清空 → 硬 cancel 该任务 exec ctx(settling-aware 分支正确归类)。
+	// Drain active planner and worker runs. They handle their own wrap-up under the clipped
+	// MaxDuration. Cancel task execution if the grace period expires.
 	hardStop := time.Now().Add(settleDrainGrace)
 	for e.inflightCount(t.ID) > 0 {
 		if time.Now().After(hardStop) {
 			log.Printf("[deadline] task %s drain 超时(%s),硬取消在跑 run", t.ID, settleDrainGrace)
 			e.cancelExec(t.ID, agent.AbortSettleDrainTimeout)
-			_ = sleepCtx(ctx, 3*time.Second) // 给 worker 分支一点时间落库/归类
+			_ = sleepCtx(ctx, 3*time.Second) // Allow cancelled workers time to record their results.
 			break
 		}
 		if sleepCtx(ctx, 500*time.Millisecond) {
-			return // 引擎整体关停
+			return // The engine is shutting down.
 		}
 	}
 
-	// ⑤ 终局一轮 planner(任务超时词,最后目标判定,不产新意图)。
+	// Run the final planner round, which evaluates goals without creating new intents.
 	met := e.runFinalPlannerRound(ctx, t)
 	if !e.beginTaskOperation(t.ID) {
 		return
 	}
 	defer e.decInflight(t.ID)
 
-	// ⑥ 定终态(带守卫):met → done(completed);否则 timeout。若常规路径已先落 done,
-	// 守卫(SetTaskStatusGuarded)会拒绝覆盖,保留 completed 语义。
+	// Mark met tasks done and others timed out. SetTaskStatusGuarded preserves a concurrent
+	// completion.
 	status := "timeout"
 	if met {
 		status = "done"
@@ -246,7 +245,8 @@ func (e *Engine) runFinalPlannerRound(ctx context.Context, t *Task) (met bool) {
 		}
 		planner, _ = e.snapshotFor(t)
 	}
-	// 独立 ctx(不挂 execCancel,避免 pause/硬 cancel 打断这最后一轮),带 Final 注入任务超时词。
+	// Use a separate context so pause or a hard execution cancellation cannot interrupt the final
+	// round. Set Final to inject the deadline prompt.
 	fctx := e.clockCtx(ctx, t, true)
 	if !e.beginTaskOperation(t.ID) {
 		return false

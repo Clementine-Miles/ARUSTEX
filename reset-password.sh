@@ -1,22 +1,22 @@
 #!/usr/bin/env bash
 # =============================================================================
-# ARTEX 管理员密码重置脚本
+# Reset the ARTEX administrator password.
 #
-# 登录用户名固定为 ARTEX；密码以 bcrypt 哈希存放在数据库 settings 表的
-# auth.password_hash 键。本脚本连上数据库后，用 pgcrypto 在库内生成 bcrypt 哈希
-# 并写回该键——与后端登录校验（golang.org/x/crypto/bcrypt）完全兼容。
+# The administrator username is ARTEX. PostgreSQL pgcrypto generates a bcrypt
+# hash compatible with the backend and stores it as settings.auth.password_hash.
 #
-# 使用本机 psql 连接已有 PostgreSQL 数据库。连接信息依次读取命令行参数、
-# ARTEX_PG_DSN、配置文件（--config > ARTEX_CONFIG > config.json）。
+# Connect using the local psql client. Connection precedence is CLI options,
+# ARTEX_PG_DSN, then the config file (--config > ARTEX_CONFIG > config.json).
 #
-# 用法示例：
-#   ./reset-password.sh                          # 本地，自动读 config.json/环境，交互输入新密码
-#   ./reset-password.sh -p 'NewPass!'            # 本地，直接给定新密码
+# Examples:
+#   ./reset-password.sh                          # Prompt for the new password.
+#   ./reset-password.sh -p 'NewPass!'            # Supply the new password explicitly.
 #   ./reset-password.sh --dsn postgres://u:p@h:5432/artex
 #   ./reset-password.sh -H 127.0.0.1 -P 5433 -U autopentest -W pass -d artex
 #
-# 交互输入的新密码经环境变量和 psql \getenv 传递，SQL 使用 :'var' 自动转义。
-# 分字段配置中的数据库密码经 PGPASSWORD 传递。DSN 会作为 psql 参数传递。
+# psql reads the new password from the environment with \getenv and quotes it as
+# a SQL literal. A separate database password uses PGPASSWORD. A DSN is passed
+# as a psql argument.
 # =============================================================================
 set -euo pipefail
 
@@ -47,7 +47,7 @@ usage() {
 USAGE
 }
 
-# ---- 参数解析 -------------------------------------------------------------
+# Parse command-line options.
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -m|--mode)        [[ "${2:-}" == "local" ]] || die "仅支持本机 psql 连接"; shift 2 ;;
@@ -66,8 +66,8 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# ---- 未显式给出连接时，从配置文件读取 database.* ----------------------------
-# 优先用 python3 解析（健壮）；缺 python3 时退回 grep（config.json 为规整分字段）。
+# Read database settings from JSON when no connection was supplied. The grep
+# fallback supports simple string and numeric fields when Python is absent.
 read_config_json() {
   local path="$1"
   [[ -f "$path" ]] || return 1
@@ -78,7 +78,7 @@ try:
     d = json.load(open(sys.argv[1])).get("database", {})
 except Exception:
     sys.exit(1)
-# 支持直接给 dsn，或分字段
+# A complete DSN takes precedence over individual fields.
 if d.get("dsn"):
     print("DSN\t" + d["dsn"]); sys.exit(0)
 for k in ("host","port","user","password","dbname","sslmode"):
@@ -86,7 +86,6 @@ for k in ("host","port","user","password","dbname","sslmode"):
         print(k.upper() + "\t" + str(d[k]))
 PY
   else
-    # 极简后备：逐键 grep（值为字符串或数字）
     local k
     for k in host port user password dbname sslmode; do
       local v
@@ -113,7 +112,7 @@ apply_config_fields() {
   done
 }
 
-# ---- 采集新密码 -----------------------------------------------------------
+# Prompt for the new password if omitted.
 if [[ -z "$NEWPASS" ]]; then
   read -r -s -p "输入新密码（用户名固定为 ARTEX）：" NEWPASS; echo >&2
   [[ -n "$NEWPASS" ]] || die "密码不能为空"
@@ -122,11 +121,11 @@ if [[ -z "$NEWPASS" ]]; then
 fi
 [[ -n "$NEWPASS" ]] || die "密码不能为空"
 
-# 通过环境变量把密码交给 psql（\getenv 读取，不进入 argv/ps）
+# Pass the new password to psql through its environment.
 export ARTEX_RESET_NEWPASS="$NEWPASS"
 
-# 库内生成 bcrypt 并 upsert；密码用 :'newpw' 自动转义。CREATE EXTENSION 幂等，
-# 若数据库角色无建扩展权限会在此报错。
+# Upsert the bcrypt hash using a quoted SQL literal. If pgcrypto is missing,
+# the database role needs permission to create the extension.
 SQL=$(cat <<SQL
 \\set ON_ERROR_STOP on
 \\getenv newpw ARTEX_RESET_NEWPASS
@@ -137,8 +136,7 @@ ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();
 SQL
 )
 
-# ---- 执行 -----------------------------------------------------------------
-# 连接信息优先级：命令行 > ARTEX_PG_DSN > 配置文件
+# Fill connection details that were omitted on the command line.
 if [[ -z "$DSN" && -z "$HOST$USER$DBNAME" ]]; then
   [[ -n "${ARTEX_PG_DSN:-}" ]] && DSN="$ARTEX_PG_DSN"
 fi

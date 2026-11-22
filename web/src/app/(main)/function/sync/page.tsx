@@ -87,7 +87,7 @@ function ScopeSentryPanel() {
   );
 }
 
-// ── 数据源状态卡 ─────────────────────────────────────────────────────────────
+// Data source status
 
 function DataSourceCard({
   status,
@@ -213,7 +213,7 @@ function StatusBadge({ status, loading }: { status: SSStatus | null; loading: bo
   );
 }
 
-// ── 同步工作区（项目 / 任务维度）────────────────────────────────────────────────
+// Project and task sync
 
 function SyncWorkbench() {
   const [dimension, setDimension] = React.useState<Dimension>("project");
@@ -340,7 +340,7 @@ function SyncWorkbench() {
         <CardTitle className="text-base">选择数据同步</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
-        {/* 维度切换 */}
+        {/* Sync scope */}
         <Tabs
           value={dimension}
           onValueChange={(v) => {
@@ -354,7 +354,7 @@ function SyncWorkbench() {
           </TabsList>
         </Tabs>
 
-        {/* 资产类型 + 选项 */}
+        {/* Asset types and options */}
         <div className="flex flex-wrap items-center gap-4">
           <span className="font-medium text-sm">同步资产：</span>
           {ASSET_TYPES.map((t) => (
@@ -375,7 +375,7 @@ function SyncWorkbench() {
           )}
         </div>
 
-        {/* 搜索 + 操作 */}
+        {/* Search and actions */}
         <div className="flex items-center gap-2">
           <div className="relative max-w-xs flex-1">
             <SearchIcon className="absolute top-1/2 left-2 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -402,7 +402,7 @@ function SyncWorkbench() {
           </Button>
         </div>
 
-        {/* 列表 */}
+        {/* Results list */}
         <div className="rounded-md border">
           <Table>
             <TableHeader>
@@ -428,7 +428,7 @@ function SyncWorkbench() {
           </Table>
         </div>
 
-        {/* 分页 */}
+        {/* Pagination */}
         <div className="flex items-center justify-end gap-2">
           <Button variant="outline" size="sm" disabled={page <= 1 || loading} onClick={() => setPage((p) => p - 1)}>
             上一页
@@ -444,7 +444,7 @@ function SyncWorkbench() {
           </Button>
         </div>
 
-        {/* 结果 */}
+        {/* Sync result */}
         {result && <SyncResult result={result} />}
       </CardContent>
     </Card>

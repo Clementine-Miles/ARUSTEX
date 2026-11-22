@@ -80,12 +80,9 @@ func coldDigestsRecent(store *db.ExplorationStore, cap int) (shown []map[string]
 	return shown, moreIDs
 }
 
-// hiddenMembersFor returns a predicate telling whether a member is hidden (folded
-// into an active digest AND still cold) in the given store — so a source task's
-// overview folds exactly the way that task folds itself (§2 cross-task: "当前任务
-// 什么展示逻辑，关联任务就什么逻辑"). A revived (now hot) covered member is NOT
-// hidden (§6 render-time revival check). Returns a never-hidden predicate when the
-// store has no digests.
+// hiddenMembersFor identifies nodes still cold and folded into an active digest
+// in the given store, keeping linked-task and local overviews consistent. Revived
+// nodes are visible. With no digests, the predicate hides no nodes.
 func hiddenMembersFor(store *db.ExplorationStore) func(int64) bool {
 	covered, err := store.CoveredMembers()
 	if err != nil || len(covered) == 0 {
@@ -144,7 +141,7 @@ func (t *ToolSet) expandDigest() actool.CoreTool {
 			list := make([]map[string]any, 0, len(members))
 			for _, m := range members {
 				entry := t.digestMemberEntry(store, m)
-				if srcTaskID > 0 { // 关联任务的成员：只读，带继承标记（§2）
+				if srcTaskID > 0 { // Read-only linked-task members include an inheritance marker.
 					entry["inherited"] = true
 					entry["source_task_id"] = srcTaskID
 				}

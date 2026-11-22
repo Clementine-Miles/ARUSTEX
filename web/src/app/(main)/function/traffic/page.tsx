@@ -249,8 +249,7 @@ export default function TrafficPage() {
     [hosts, hostCountSortDirection],
   );
 
-  // "清空" for the unfiltered purge, "删除" for the host-scoped ones — the dialog's
-  // title and its confirm button both follow from which is in play.
+  // Use distinct purge and host-deletion labels in both the dialog title and confirmation action.
   const deleteVerb = deleteMode === "all" ? "清空" : "删除";
   const deleteTitle = deleteMode
     ? {
@@ -466,8 +465,7 @@ export default function TrafficPage() {
           <Trash2Icon className="size-3.5" />
           删除该目标
         </Button>
-        {/* Outline rather than a second destructive button: this one ignores every
-            filter, so it must not look one mis-click away from "删除该目标". */}
+        {/* Keep the unfiltered purge visibly distinct from the host-scoped destructive action. */}
         <Button
           variant="outline"
           size="sm"

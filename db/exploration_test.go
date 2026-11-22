@@ -247,8 +247,8 @@ func TestIntentPauseResumeAndCancelCleanup(t *testing.T) {
 	assertCount(`SELECT COUNT(*) FROM assets WHERE id=$1`, 1, assetID)
 }
 
-// TestNodesPageQueryMatchesID verifies the 播报板 search filters on node id (both
-// the bare number and the「#id」form the UI shows) in addition to payload/origin.
+// TestNodesPageQueryMatchesID covers exact ID searches, including bare numbers
+// and the #id form displayed in the activity feed.
 func TestNodesPageQueryMatchesID(t *testing.T) {
 	d, err := Open(testDSN(t))
 	if err != nil {

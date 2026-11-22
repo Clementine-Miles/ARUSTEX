@@ -76,7 +76,7 @@ function tryFormatJSON(s: string): string {
   }
 }
 
-// 复制当前框内文本的小按钮。复制成功后短暂显示对勾。text 为空/仅占位符时禁用。
+// Briefly acknowledge copying and disable the control for missing or placeholder text.
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = React.useState(false);
   const timer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -88,14 +88,14 @@ function CopyButton({ text }: { text: string }) {
     try {
       await navigator.clipboard.writeText(text);
     } catch {
-      // navigator.clipboard 在非安全上下文(如 http 局域网)不可用，回退到 execCommand。
+      // Fall back to execCommand when clipboard access is unavailable in an insecure context.
       const ta = document.createElement("textarea");
       ta.value = text;
       ta.style.position = "fixed";
       ta.style.opacity = "0";
       document.body.appendChild(ta);
       ta.select();
-      try { document.execCommand("copy"); } catch { /* 忽略：不支持则静默 */ }
+      try { document.execCommand("copy"); } catch { /* Ignore unsupported clipboard operations. */ }
       document.body.removeChild(ta);
     }
     setCopied(true);
@@ -139,15 +139,13 @@ export default function LLMRecordsPage() {
   const [selected, setSelected] = React.useState<LLMRecordItem | null>(null);
   const [detail, setDetail] = React.useState<LLMRecordDetail | null>(null);
   const [detailLoading, setDetailLoading] = React.useState(false);
-  // 归一化视图 / HTTP 原文视图。原文是排查 provider 侧问题的唯一依据：归一化视图
-  // 不含工具 schema，响应里也没有 tool_use 块。
+  // Raw HTTP records include tool schemas and tool_use responses omitted by the normalized view.
   const [rawView, setRawView] = React.useState(false);
 
   const hasRaw = !!(detail?.raw_request || detail?.raw_response);
-  // 开关保持用户选择，但切到一条无原文的旧记录时自动落回解析视图，而不是显示空白。
+  // Retain the preference, but show normalized content for older records without raw data.
   const showRaw = rawView && hasRaw;
-  // 原文请求体是 JSON，pretty-print 只改排版不改语义，便于阅读；原文响应是 SSE
-  // 帧，tryFormatJSON 解析失败会原样返回，故两边共用一个函数即可。
+  // Pretty-print JSON request bodies and leave SSE response text unchanged.
   const reqText = showRaw
     ? detail?.raw_request && tryFormatJSON(detail.raw_request)
     : detail?.request_body && tryFormatJSON(detail.request_body);
@@ -485,8 +483,7 @@ export default function LLMRecordsPage() {
               ) : (
                 <Badge variant="destructive" className="text-xs">Error</Badge>
               )}
-              {/* 原文视图开关。旧记录没有原文，此时禁用而非静默回退，避免看着像
-                  「原文与解析一致」。 */}
+              {/* Disable the raw toggle when an older record has no raw content to display. */}
               <Button
                 variant={showRaw ? "secondary" : "ghost"}
                 size="sm"

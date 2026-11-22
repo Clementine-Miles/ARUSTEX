@@ -26,23 +26,20 @@ type chatAttachment struct {
 	Name string `json:"name"`
 	Path string `json:"path"`
 	Size int64  `json:"size"`
-	// Abs 是落盘的绝对路径(m.dir 已是绝对)。建任务前暂存(scope=staging)时前端要用它把
-	// 提示词写进描述;task/session 走 composeAgentMessage 在后端拼路径,不依赖此字段。
+	// Abs is the absolute on-disk path. The frontend uses it in task descriptions for staging
+	// uploads. Existing tasks and sessions compose attachment paths on the backend.
 	Abs string `json:"abs,omitempty"`
 }
 
-// chatUpload implements method-1 file support: it saves one or more files into a chat's
-// working dir under uploads/, so the agent opens them with its existing Read/Bash tools
-// and the sent message carries their paths. No LLM-layer change, no multimodal.
+// chatUpload stores attachments under the chat working directory so the Agent can open them
+// through Read or Bash. It accepts repeatable multipart fields named "file" and returns
+// {attachments:[{name,path,size,abs}]}.
 //
-// POST /api/chat/upload?scope=task|session|staging&id=<id>, multipart field "file"
-// (repeatable). Returns {attachments:[{name,path,size,abs}]}. Target dir mirrors the
-// agent CWD layout:
+// POST /api/chat/upload?scope=task|session|staging&id=<id>
 //
-//	scope=task    → <workDir>/tasks/<id>/uploads/
-//	scope=session → <workDir>/sessions/<id>/uploads/
-//	scope=staging → <workDir>/drafts/<id>/uploads/   (建任务前暂存:任务尚无 ID,
-//	                文件先落这里,前端按返回的 abs 绝对路径写进任务描述)
+// The upload directory is tasks/<id>/uploads/ for task scope, sessions/<id>/uploads/ for session
+// scope, and drafts/<id>/uploads/ for staging. A draft has no task ID yet, so its description uses
+// the returned absolute path.
 func (s *Server) chatUpload(w http.ResponseWriter, r *http.Request) {
 	var sub string
 	taskScoped := false

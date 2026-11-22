@@ -31,8 +31,7 @@ func TestRenderSystemOverrideAndFallback(t *testing.T) {
 		t.Fatalf("bad var should fall back to default, got %q", got)
 	}
 
-	// full plannerSystem path: DB body [A] is honored, then the code-owned tail
-	// [C] (中间产物输出规约) is ALWAYS appended — editing the body can't drop it.
+	// plannerSystem honors the stored body and appends the required artifact rules.
 	PromptOverride = func(k string) (string, bool) { return "PLANNER {{.Goal}}", true }
 	got := plannerSystem("拿下X", "/data", "/data")
 	if !strings.HasPrefix(got, "PLANNER 拿下X") {

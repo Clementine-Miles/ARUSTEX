@@ -18,11 +18,11 @@ export default function LoginPage() {
   const [checking, setChecking] = useState(true);
 
   useEffect(() => {
-    // 已登录直接进主界面（静态导出下无 middleware 代劳这层跳转）。
+    // Redirect existing sessions in the browser because the static export has no middleware.
     const token = auth.getToken();
     if (token) {
-      // localStorage 可能仍有凭据但 cookie 已丢失。先同步，再发起全新请求，
-      // 避免服务端守卫或路由缓存把跳转送回仍处于 checking 状态的登录页。
+      // Restore a missing cookie from localStorage and force a fresh navigation to avoid a stale login
+      // redirect.
       auth.setToken(token);
       window.location.replace("/function/tasks");
       return;

@@ -44,7 +44,7 @@ interface TemplateDraft {
   interceptRules: AssetInterceptRuleInput[];
 }
 
-// TemplateSeed 是「另存为模板」时从创建表单带入的初值。
+// Seed the save-as-template form from task creation fields.
 type TemplateSeed = Pick<TemplateDraft, "description" | "goal" | "categoryID" | "interceptRules">;
 
 interface TaskTemplateManagerProps {

@@ -11,7 +11,8 @@ export async function persistPreference(key: PreferenceKey, value: string) {
     case "none":
       return;
 
-    // 静态导出无 Node 服务端，server-cookie 退化为浏览器 cookie（写入语义等价）。
+    // Static export has no Node server. Implement server-cookie storage with a browser cookie while retaining
+    // the same write semantics.
     case "server-cookie":
     case "client-cookie":
       setClientCookie(key, value);

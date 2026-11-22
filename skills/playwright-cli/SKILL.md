@@ -247,16 +247,12 @@ playwright-cli -s=msedge detach
 playwright-cli delete-data
 ```
 
-## URLs with `&` on Windows
+## URLs with query parameters
 
-On Windows, `cmd.exe` and PowerShell treat `&` as a command separator, so URLs with multiple query parameters get truncated before `playwright-cli` runs. Escape `&` with `^&` in `cmd.exe`, or use `--%` in PowerShell:
+Quote URLs containing `&` so the shell passes the entire URL as one argument.
 
-```batch
-playwright-cli goto "https://example.com/?a=1^&b=2"
-```
-
-```powershell
-playwright-cli --% goto "https://example.com/?a=1&b=2"
+```bash
+playwright-cli goto 'https://example.com/?a=1&b=2'
 ```
 
 ## Snapshots

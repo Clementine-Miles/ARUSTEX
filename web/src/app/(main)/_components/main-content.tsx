@@ -15,7 +15,7 @@ import { LayoutControls } from "./sidebar/layout-controls";
 import { SearchDialog } from "./sidebar/search-dialog";
 import { ThemeSwitcher } from "./sidebar/theme-switcher";
 
-// 任务详情页保持原样：它自带头部/Tabs 与内边距，这里不再叠加全局头部和 padding。
+// Task details supply their own header, tabs and padding.
 function isFullBleed(pathname: string) {
   const p = (() => {
     try {
@@ -24,8 +24,7 @@ function isFullBleed(pathname: string) {
       return pathname;
     }
   })();
-  // 静态导出开了 trailingSlash，列表页自身的 pathname 是 "/function/tasks/"，
-  // 先去掉尾斜杠再判前缀，否则列表页会被误判成详情页而丢掉全局头部。
+  // Strip the trailing slash so the exported task list still receives the global header.
   const normalized = p.replace(/\/+$/, "");
   return normalized.startsWith("/function/tasks/");
 }

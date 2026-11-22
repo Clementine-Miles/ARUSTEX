@@ -5,18 +5,17 @@ import (
 	"time"
 )
 
-// LLM 重试策略：五层重试的「次数 + 间隔」全局配置，见 docs/LLM重试设计.md。
-// 存在 settings 表的一个 JSON 值里 —— 它是整机一份的运行参数，不值得为它开一张表；
-// 读取走内置默认兜底，所以键不存在(全新库/从未配置过)时行为与写死常量时代完全一致。
+// Store the five global retry layers as one JSON settings value. A missing setting preserves the
+// built-in defaults.
 
 const settingLLMRetryPolicy = "llm_retry_policy"
 
 // RetryRule is one layer's knob pair. The zero value means "unset":
 //
-//	Attempts   0 = 用内置默认次数; -1 = 关闭该层重试; >0 = 用该值
-//	IntervalMS 0 = 用该层原本的间隔策略(通常是指数退避); >0 = 改用固定毫秒间隔
+// Attempts: zero defaults, -1 disables, positive overrides. IntervalMS: zero preserves the
+// default schedule, positive fixes the interval in milliseconds.
 //
-// -1 是「显式关掉」而不是「0 次」，因为 0 已经被「未配置」占用了。
+// Use -1 for deliberate disable because zero represents an unspecified value.
 type RetryRule struct {
 	Attempts   int `json:"attempts"`
 	IntervalMS int `json:"interval_ms"`
@@ -76,20 +75,25 @@ func (o RetryOverride) Clamped() RetryOverride {
 	return o
 }
 
-// LLMRetryPolicy holds the五层 retry configuration. Connect/Empty/Stream are the
+// LLMRetryPolicy holds five retry layers. Connect, Empty, and Stream are the
 // per-request layers (a profile may override them, see LLMProfile.Retry);
 // Breaker and Intent are process-wide by nature and live only here.
 type LLMRetryPolicy struct {
-	// Connect：SDK 建连重试(连接重置/超时/429/5xx，流开始前)。默认 3 次、指数退避。
+	// Connect handles pre-stream resets, timeouts, 429s, and 5xx. Default: three with exponential
+	// backoff.
 	Connect RetryRule `json:"connect"`
-	// Empty：SDK 空响应重试(完成但无 content block，仅 openai 格式)。默认 2 次、指数退避。
+	// Empty retries a completed OpenAI response with no content. Default: two with exponential
+	// backoff.
 	Empty RetryRule `json:"empty"`
-	// Stream：同 provider 安全窗口重试(未交付输出前的断流重放)。默认 2 次、0.5s 起指数(封顶 4s)。
+	// Stream replays failures before delivering output. Default: two, backed off from 500 ms to 4
+	// seconds.
 	Stream RetryRule `json:"stream"`
-	// Breaker：轮询熔断。Attempts=连续几次瞬时失败触发熔断(默认 3，-1=瞬时失败不熔断，
-	// 硬失败如余额不足/密钥失效仍立即熔断)；IntervalMS=固定冷却时长(0=默认 1/5/30min 梯度)。
+	// Breaker opens after three consecutive transient failures by default. -1 disables transient
+	// opening, while hard failures still open immediately. Zero interval selects the 1, 5, or 30
+	// minute backoff.
 	Breaker RetryRule `json:"breaker"`
-	// Intent：worker 以 model_error 收场后的整条意图重跑。默认 2 次、固定 3s。
+	// Intent retries an entire worker intent after model_error. Default: twice at three-second
+	// intervals.
 	Intent RetryRule `json:"intent"`
 }
 

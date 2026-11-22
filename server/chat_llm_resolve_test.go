@@ -57,10 +57,8 @@ func TestChatUnavailableReasonDistinguishesStates(t *testing.T) {
 	}
 }
 
-// TestResolveChatAgentHonoursConversationProfile is the regression guard for the
-// reported bug: a conversation that picked a valid profile must resolve a chat
-// agent even when NO global profile is active, so the send precheck stops
-// rejecting it with "LLM 未配置".
+// TestResolveChatAgentHonoursConversationProfile verifies that a conversation with a valid profile
+// can send messages even if no global LLM profile is active.
 func TestResolveChatAgentHonoursConversationProfile(t *testing.T) {
 	m, err := NewManager(t.TempDir(), "")
 	if err != nil {

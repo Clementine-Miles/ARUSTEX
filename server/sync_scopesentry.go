@@ -13,18 +13,13 @@ import (
 	"github.com/Autumn-27/artex/mcphttp"
 )
 
-// 资产同步（ScopeSentry 数据源）。
-//
-// ScopeSentry 是一个 ASM 资产测绘平台，通过其 MCP 接口按【项目】/【任务】两个维度
-// 拉取子域名、Web 应用、服务等资产，映射为 ARTEX 的公司 + 资产模型。数据源本身是
-// 一个名为 "ScopeSentry" 的 http 传输 MCP 行（url + X-API-Key 头保存在 mcp_servers）。
-//
-// 与 agent 工具层不同，这里用 mcphttp.Client.Call 直接调用 MCP 工具、拿原始 JSON，
-// 不触发 AskUser 权限弹窗（后台批量同步）。
+// Import ScopeSentry subdomains, web applications, and services by project or task and map them to
+// ARTEX companies and assets. The ScopeSentry HTTP MCP row stores the URL and API-key header. This
+// backend sync calls MCP directly for raw JSON outside the Agent approval flow.
 
 const (
 	scopeSentryMCPName = "ScopeSentry"
-	syncMaxPerType     = 5000 // 单目标单类型的入库保护上限
+	syncMaxPerType     = 5000 // Limit imported entries per target and asset type.
 	syncDefaultPage    = 100
 )
 

@@ -181,9 +181,7 @@ function toolInputText(tool: string, raw: string): string {
   return raw;
 }
 
-// InterceptCard renders an inline intercept_request approval card. The pending_id
-// is extracted from the summary (format: "工具 X 请求审批 (#N)") so buttons are
-// available immediately without waiting for the detail load.
+// Extract the approval ID from the event summary so the inline controls work before detail data loads.
 function InterceptCard({
   step,
   getDetail,
@@ -191,7 +189,7 @@ function InterceptCard({
   step: Activity;
   getDetail: (seq: number) => Promise<string>;
 }) {
-  // extract pending_id from summary: "工具 Bash 请求审批 (#42)"
+  // Read the numeric approval ID at the end of the summary.
   const pendingId = React.useMemo(() => {
     const m = /\(#(\d+)\)/.exec(step.summary);
     return m ? parseInt(m[1], 10) : null;
@@ -382,7 +380,7 @@ function ToolBlock({
   const rawCmd =
     use && use.summary.startsWith(toolName) ? use.summary.slice(toolName.length).trimStart() : (use?.summary ?? "");
   const cmd = toolInputText(toolName, rawCmd);
-  // status only — the full result lives behind the expand (【输出】), not previewed inline
+  // Show only status in the collapsed view. The expanded details contain the full output.
   const statusText = running ? "执行中…" : ok ? "✓" : "✕ 失败";
 
   // key over the seqs we'd load; changes when the result (or command) arrives.

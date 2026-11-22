@@ -37,8 +37,7 @@ import {
 import { api } from "@/lib/api";
 import type { Agent, Tool } from "@/lib/types";
 
-// Traffic tools are host tools gated by the global 流量捕获 switch: bindable, but
-// only usable when capture is on. Keep in sync with traffic.SeedToolMetas.
+// Host traffic tools require capture to be enabled. Keep this list aligned with traffic.SeedToolMetas.
 const TRAFFIC_TOOL_KEYS = new Set(["traffic_search", "traffic_get"]);
 
 // paramRows flattens schema.properties into an ordered row list for editing.
@@ -154,7 +153,7 @@ function ToolEditor({
   onSaved: () => void;
   onClose: () => void;
 }) {
-  // traffic tools can't be bound/enabled until the global 流量捕获 switch is on.
+  // Tool bindings require global traffic capture.
   const trafficGated = TRAFFIC_TOOL_KEYS.has(tool.key) && !captureOn;
   const [description, setDescription] = React.useState(tool.description);
   const [bound, setBound] = React.useState<string[]>(tool.agents);
@@ -519,7 +518,7 @@ export default function ToolsPage() {
   );
 }
 
-// ---- 自定义工具编辑器 ----
+// Custom tool editor
 
 type ExecState = {
   command: string;

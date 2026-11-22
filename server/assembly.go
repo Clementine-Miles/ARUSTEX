@@ -204,11 +204,10 @@ func seedPrompts(pg *db.DB) {
 	}
 }
 
-// wireTools seeds the built-in tool catalog (idempotent, first-insert only so page
-// edits survive restart) and wires the DB tools table into the agent runtime: at
-// tool-assembly time each built-in tool is filtered by its agent binding / enabled
-// flag and, if kept, wrapped so the model sees the DB-overridden description/schema
-// and缺省入参 get injected. MCP/skill/host tools have no row and pass through.
+// wireTools seeds the built-in tool catalog on first insert so UI edits survive restart. It
+// filters tools by Agent binding and enabled state. For retained tools, it applies database
+// descriptions and schemas and injects default arguments. MCP, skill, and host tools without
+// catalog entries pass through.
 func wireTools(pg *db.DB, domainReg map[string]actool.CoreTool) {
 	agent.FindingTrafficBindingEnabled = func() bool { return pg.GetBool(settingAgentTrafficBinding, false) }
 	// Seed the built-in domain tools (first-insert only; DO NOTHING preserves edits).
@@ -305,10 +304,8 @@ func wireTools(pg *db.DB, domainReg map[string]actool.CoreTool) {
 				}
 			}
 		}
-		// interactive shell: gated purely by the agent's interactive_shell flag (like
-		// web_search), NOT by tools-table binding. When on, inject the 5 shell_* tools
-		// and COUPLE the Bash description addendum so it points at shell_open — and never
-		// dangles when off. See docs/交互式shell设计.md §14.2.
+		// The Agent's interactive_shell setting enables the five shell_* tools and adds a matching
+		// Bash description directing the model to shell_open.
 		if !actool.InteractiveShellDisabled() {
 			if a, err := pg.GetAgentByKey(agentKey); err == nil && a != nil && a.InteractiveShell {
 				out = append(out, actool.ShellSessionTools()...)

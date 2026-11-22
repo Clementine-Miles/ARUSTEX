@@ -7,9 +7,7 @@ import { SearchIcon } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
-// ── DSL autocomplete ──────────────────────────────────────────────────────────
-// Shared by the global asset view (/function/assets) and the per-task 测试资产
-// search, so both search boxes behave and look identical.
+// Share DSL autocomplete behavior across global and task asset views.
 
 const DSL_FIELDS: { name: string; desc: string; ops: { op: string; desc: string }[] }[] = [
   {
@@ -260,9 +258,7 @@ const KIND_STYLE: Record<string, string> = {
   logic: "text-emerald-500 dark:text-emerald-400",
 };
 
-// AssetDslSearch is the shared DSL search box: a monospace input with a
-// field/operator/logic autocomplete popover and a status line ("找到 N 条" /
-// error / loading). Used by both the global asset view and the per-task view.
+// Render common DSL autocomplete and status in both global and per-task asset search.
 export function AssetDslSearch({
   query,
   onChange,

@@ -30,10 +30,8 @@ type Config struct {
 	SkillDir string   `json:"skill_dir"`
 }
 
-// BaseDir is the directory that anchors all runtime artifacts (config.json and
-// the data/ store). It is the directory the running binary lives in, so a
-// distributed executable keeps its files next to itself on any OS (Windows,
-// Linux, …) regardless of the working directory it is launched from.
+// BaseDir anchors runtime files such as config.json and data/ next to the
+// locally built executable, regardless of the current working directory.
 //
 // When launched via `go run`, the binary is throwaway: it sits either in a temp
 // build dir (cache miss → fresh link) OR straight inside the Go build cache
