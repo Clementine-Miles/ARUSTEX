@@ -4,16 +4,11 @@
 
 AI 自主渗透测试系统（Go 后端 + Next.js 前端）
 
-
-🌐 **在线 Demo**： [https://artex-demo.vercel.app/](https://artex-demo.vercel.app/)
-
 </div>
 
 ---
 
 ## 截图预览
-
-> 完整交互见[在线 Demo](https://artex-demo.vercel.app/)。
 
 | 仪表盘（总览 / Token 消耗 / 活动流） | 任务列表 |
 | :---: | :---: |
@@ -64,108 +59,46 @@ AI 自主渗透测试系统（Go 后端 + Next.js 前端）
 
 ## 安装
 
-ARTEX 原生运行，连接本机或外部管理的 **PostgreSQL**。请先准备数据库及访问账号，并允许该账号创建、迁移应用表。将连接信息写入 `config.json` 或设置 `ARTEX_PG_DSN`。使用 Agent 前，在 UI 中配置 LLM，或通过进程环境设置 `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`。
+ARTEX 在 Linux amd64 或 arm64 上从本地源码编译运行。需要 Bash、Go 1.26.3 或更高版本，以及可访问的 PostgreSQL。构建内嵌前端时还需要 Node.js 22 或更高版本和 npm。克隆或同步源码需要 Git。按启用的 Skill 或 MCP 配置安装所需工具，并将可执行文件加入 ARTEX 进程的 `PATH`。
 
-新安装时，从 `config.example.json` 创建配置并填写数据库连接。已有部署直接沿用现有配置，可用 `ARTEX_CONFIG` 指定配置文件路径。`skill_dir` 留空时，ARTEX 使用可执行文件同级的 `skills/`。
+### 配置 PostgreSQL
 
-### 方式一：安装脚本（Linux / macOS）
+准备本机或外部管理的 PostgreSQL 数据库和访问账号，允许该账号创建和迁移应用表。将连接信息写入 `config.json`，或设置优先级更高的 `ARTEX_PG_DSN`。设置 `ARTEX_CONFIG` 可指定配置文件路径。已有部署直接沿用原有配置。`skill_dir` 留空时使用可执行文件同级的 `skills/`。连接远程数据库时，可在连接配置中指定 `sslmode=verify-full` 及相应的 CA。
 
-需要 Go 1.26.3 或更高版本，构建前端需要 Node.js 22 和 npm。
+### 编译并启动
 
 ```bash
 git clone https://github.com/Clementine-Miles/ARTEX.git
 cd ARTEX
 test -e config.json || (umask 077; cp config.example.json config.json)
-# 编辑 config.json，填写已有 PostgreSQL 的连接信息
+# Edit config.json to configure PostgreSQL, or set ARTEX_PG_DSN.
 ./install.sh -addr 127.0.0.1:8787
 ```
 
-如已设置 `ARTEX_PG_DSN`，可以跳过创建 `config.json`。脚本构建二进制并调用 `start.sh`，在检测到 npm 时同时构建并嵌入前端。使用内嵌前端时，打开 **http://localhost:8787**，首次访问 `/setup` 设置管理员密码。只构建后端时，可另开终端，在具备 Node.js 和 npm 的环境中运行 `cd web && npm ci && npm run dev -- --hostname 127.0.0.1`，再打开前端终端显示的地址。
+已经设置 `ARTEX_PG_DSN` 时，可以跳过创建 `config.json`。安装脚本编译当前源码后启动 ARTEX。首次访问 `http://127.0.0.1:8787/setup` 设置管理员密码。使用 Agent 前，在「LLM 配置」页填写凭据，或设置 `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`。
 
-### 方式二：使用预编译二进制（Releases）
-
-如果此仓库已发布[预编译包](https://github.com/Clementine-Miles/ARTEX/releases)，下载对应平台的 zip 并按 `SHA256SUMS` 核对压缩包。解压后配置 PostgreSQL，再运行随包提供的启动脚本。
+也可以分开编译和启动，方便先准备构建产物再启动服务。
 
 ```bash
-test -e config.json || (umask 077; cp config.example.json config.json)
-# 编辑 config.json，填写已有 PostgreSQL 的连接信息
+./build.sh
 ./start.sh -addr 127.0.0.1:8787
 ```
 
-Windows 用户可将 `config.example.json` 复制为 `config.json`，填写数据库连接后运行 `start.bat -addr 127.0.0.1:8787`。启动脚本根据程序退出码决定是否重启，并负责完成[页面一键更新](#方式一页面一键更新)和回滚。需要后台运行时，可以将启动脚本交给系统服务管理器。
-
-### 方式三：从源码编译单二进制
-
-先配置 PostgreSQL，再在项目根目录运行以下命令。
-
-```bash
-ARTEX_OUTPUT=./artex ./build.sh
-./start.sh -addr 127.0.0.1:8787
-```
-
-构建需要 Go 1.26.3 或更高版本、Node.js 22、npm 和 `rsync`。ARTEX 在宿主机查找外部工具。按已启用的 Skill 或 MCP 配置安装所需工具，并将可执行文件放入 ARTEX 进程的 `PATH`。
-
-### 方式四：构建跨平台 Release 压缩包
-
-`build.sh` 会先构建并嵌入前端，再使用 Go linker 去除调试信息，并将发布文件压缩为 zip。Release 模式默认生成 Linux amd64/arm64、macOS amd64/arm64 和 Windows amd64 的 zip 包：
-
-```bash
-./build.sh --release
-# 产物为 dist/artex-<版本>-<系统>-<架构>.zip 和 dist/SHA256SUMS
-```
-
-UPX 自解压二进制可能与部分 Linux 内核、虚拟化环境或安全策略不兼容，因此默认不启用。可用 `ARTEX_TARGETS` 自定义目标；确认目标运行环境兼容时，可显式传入 `--upx` 进一步缩小二进制：
-
-```bash
-ARTEX_TARGETS=linux/amd64,windows/amd64 ./build.sh --release
-./build.sh --target linux/amd64 --upx
-```
+构建默认将 Next.js 静态前端嵌入项目根目录的 `artex`。添加 `--backend-only` 可通过 `build.sh` 或 `install.sh` 仅编译 Go 后端。首次构建所缺的 Go 和 npm 依赖由各自的工具解析。启动脚本直接运行已有的本地编译产物。前台运行时可按 Ctrl-C 停止，由系统服务托管时可发送 SIGTERM，两种方式均可触发优雅关停。
 
 ---
 
 ## 更新升级
 
-升级前请备份 PostgreSQL、`config.json`、`data/`、`jwt.key` 和 `skills/`，或对应的自定义路径。重启时 ARTEX 会自动应用数据库 schema 迁移。若需切换数据库实例，请先将旧库导出并恢复到新实例，再更新连接配置。沿用原有的数据与 Skill 目录可保留工作区和用户安装的 Skill。
-
-### 页面更新源
-
-页面一键更新的代码固定从 [Hinln/ARTEX Releases](https://github.com/Hinln/ARTEX/releases) 检查和下载版本。从 `Clementine-Miles/ARTEX` 构建的正式版本也使用该来源。若要安装当前仓库发布的版本，请按下文手动安装预编译包或从源码更新。
-
-如果更新源为私有仓库，请在 ARTEX 后端进程环境中设置 `ARTEX_UPDATE_GITHUB_TOKEN`，向令牌授予 `Hinln/ARTEX` 仓库的 **Contents 读取**权限。后端使用令牌查询 Release 和下载附件。`.env.example` 列出了可用的环境变量，启动脚本从进程环境读取变量。
-
-页面更新需要更新源发布正式版本，并附上 `artex-<版本>-<os>-<arch>.zip` 和 `SHA256SUMS`。当前仓库的 Release 工作流在推送 `v*` tag 时为当前仓库生成这些附件。
-
-### 方式一：页面一键更新
-
-在 **系统配置** 页（侧边栏「系统配置」→ `/system/settings`）的**版本与更新**卡片里，可以直接检查并安装新版本，无需登录服务器。
-
-点「更新」后：下载当前平台的发布包 → 比对 Release 的 `SHA256SUMS` → 用 `-h` 冒烟测试新二进制 → 暂存为 `artex.new` → 程序退出，由 `start.sh` / `start.bat` 重新拉起并完成换装。页面会自动等到新版本上线后刷新。
-
-- **失败不会留下坏程序**：校验或冒烟不通过就丢弃暂存件、继续跑当前版本；换装后的新版若连续 3 次启动失败，会自动回滚到 `artex.old`（失败的那个留作 `artex.failed` 供排查）。
-- **随时可回退**：上一版本保留为 `artex.old`，卡片上有「回滚到上一版本」。注意数据库结构不会回退。
-- **更新会中断正在运行的任务**——更新即重启，请在空闲时进行。
-- **开发构建不给更新**：版本号是 `dev` 或 `git describe` 带后缀时禁用，避免正式版覆盖掉本地调试的二进制。
-- 访问 GitHub 需要代理时，在同一页面配置**全局代理**即可，更新链路会走它。更新只从 GitHub 域名下载并强制 HTTPS。
-
-### 方式二：一键更新脚本
+更新前备份 PostgreSQL、`config.json`、`data/`、`jwt.key` 和 `skills/`，或对应的自定义路径。沿用相同的数据库和目录可保留任务数据、凭据及用户安装的 Skill。若要切换数据库实例，先将旧库备份恢复到新实例，再修改连接配置。ARTEX 启动时会迁移数据库表结构。
 
 ```bash
-cd ARTEX
 ./update.sh
+# To fast-forward from the configured Git upstream before building:
+./update.sh --pull
 ```
 
-脚本默认从当前工作树重建二进制。运行 `./update.sh --pull` 可先快进合并 Git 上游再构建。完成后，请停止当前进程并通过 `start.sh` 重新启动。
-
-### 方式三：预编译二进制（Releases）
-
-从[当前仓库的 Releases](https://github.com/Clementine-Miles/ARTEX/releases) 获取对应平台的发布包并校验 `SHA256SUMS`。停止服务，备份现有二进制，再将新二进制复制到原位置并重启。如果需要新版附带的 Skill，请逐项合并到已有 `skills/`，保留自定义文件。
-
-### 方式四：从源码编译
-
-```bash
-ARTEX_OUTPUT=./artex ./build.sh
-# 停止当前进程后，按原有参数重新运行 ./start.sh
-```
+以上两条命令任选其一。默认只编译当前工作树。仅在明确指定 `--pull` 时，脚本才从已配置的 Git 上游快进更新源码。仅运行后端的部署可同时传入 `--backend-only`。编译失败时保留上次构建产物。编译成功后，待任务完成，停止当前进程并用原参数再次运行 `start.sh`。由系统服务托管时，通过该服务管理器手动重启。
 
 ---
 
@@ -209,7 +142,7 @@ server {
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-Proto $scheme;
 
-        # SSE 关键项：关缓冲、长超时、HTTP/1.1
+        # Disable buffering and use a long read timeout for SSE.
         proxy_buffering off;
         proxy_cache off;
         proxy_read_timeout 3600s;
@@ -239,14 +172,22 @@ server {
 
 ### 本地运行与测试
 
+配置好开发用 PostgreSQL 后，在项目根目录运行以下命令。打开 `http://127.0.0.1:5173` 使用带热更新的前端。`/api` 由开发服务器代理到本机后端。
+
 ```bash
-./dev.sh    # 后端(:8787) + 流量代理(:8788) + 前端 next dev(:5173) → http://localhost:5173
+(cd web && npm ci)
+./dev.sh
 ```
 
-- 后端：`go run ./cmd/artex`（不带 `-tags embedui` 则不内嵌前端）
-- 前端：`cd web && npm run dev`（`/api` 反代到后端，带热更新）
-- 测试：`go test ./...`
-- Mock 预览（无后端）：`cd web && NEXT_PUBLIC_MOCK=1 npm run dev`
+开发进程使用本地回环地址，后端和流量代理分别监听 8787 和 8788。只启动后端可运行 `go run ./cmd/artex -addr 127.0.0.1:8787`。无需后端的本地模拟预览可运行 `cd web && NEXT_PUBLIC_MOCK=1 npm run dev -- --hostname 127.0.0.1`。
+
+```bash
+go test ./...
+go vet ./...
+(cd web && npm run build:static)
+```
+
+运行完整 Go 测试前，将 `ARTEX_PG_DSN` 指向专用测试数据库。部分测试要求数据库可用，并会写入该库。静态导出构建包含 TypeScript 检查。
 
 ---
 
@@ -420,50 +361,8 @@ flowchart TB
 
 ---
 
-## 交流群
-
-扫码关注微信公众号 **SecSentry**，在公众号后台私信即可入群交流。
-
-<div align="center">
-
-<img src="screenshots/wx.png" alt="微信公众号 SecSentry" width="480" />
-
-</div>
-
----
 ## 参考
 
 https://github.com/oritera/Cairn
 
-
-## 许可与免责声明
-
-### 开源协议
-
-本项目采用 **GNU Affero General Public License v3.0（AGPL-3.0）** 授权，完整条款见仓库根目录的 [LICENSE](LICENSE) 文件。
-
-这意味着任何人都可以自由使用、修改和分发本项目，但**衍生作品必须同样以 AGPL-3.0 开源**；特别地，**若你修改本项目并通过网络（如部署为在线服务）向用户提供，也必须向这些用户公开对应的完整源码**。
-
-> ⚠️ **重要提示**：开源协议本身不限制软件的使用用途。以下的「使用限制」与「免责声明」是作者对使用者的额外约定与郑重声明，请务必遵守。
-
-**ARTEX 仅供个人学习、代码研究与本地技术验证使用，不得用于对任何线上系统或网站发起实际测试。**
-
-### 允许使用范围
-
-- 仅可用于**阅读、学习与研究本项目源码**，以及在**本地隔离环境**中进行技术原理验证；
-- 适用于个人学习、学术研究、代码审阅等非攻击性用途。
-
-### 禁止事项
-
-- **严禁使用本工具对任何网站、线上服务或联网系统发起扫描、探测、利用或攻击**（无论是否获得授权、是否为自有资产）；
-- 严禁将本工具用于任何实际的渗透测试、攻防对抗或生产环境；
-- 严禁将本工具用于非法入侵、数据窃取、勒索、拒绝服务或任何破坏性、犯罪性活动；
-- 严禁利用本工具从事违反所在国家/地区法律法规的行为。
-
-### 合规责任
-
-使用者须自行遵守所在国家/地区关于网络安全、数据保护与计算机犯罪的全部法律法规（在中国大陆包括但不限于《网络安全法》《数据安全法》《个人信息保护法》及相关司法解释）。**因使用本工具产生的一切法律责任与后果，均由使用者自行承担。**
-
-### 免责声明
-
-本项目按“现状（AS IS）”提供，不附带任何明示或默示的担保。作者及贡献者不对使用本工具（无论使用方式是否得当）所导致的任何直接或间接损失、数据丢失、系统损坏或法律纠纷承担责任。**下载、安装或使用本项目，即表示你已阅读、理解并同意上述全部条款。**
+项目采用 [AGPL-3.0](LICENSE)。前端所含 MIT 授权材料及版权声明见 [web/LICENSE](web/LICENSE)。

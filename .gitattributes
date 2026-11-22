@@ -1,2 +1,2 @@
-*.bat text eol=crlf
 *.sh  text eol=lf
+skills/api-recon/scripts/preload.js whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
