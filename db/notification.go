@@ -13,9 +13,8 @@ import (
 	"github.com/Autumn-27/artex/notify"
 )
 
-// Notification channel configuration and event storage. Delivery claim and state transitions are
-// in
-// db/notification_delivery.go。
+// Telegram channel configuration and event storage. Delivery claims and state transitions live
+// in notification_delivery.go.
 //
 // Preserve these event-production and filtering invariants.
 //
@@ -46,12 +45,10 @@ func ValidNotifyMode(m string) bool {
 	return m == NotifyModeRealtime || m == NotifyModeDigest
 }
 
-// NotificationChannel stores raw JSON configuration and filters. The notify package interprets
-// them.
+// NotificationChannel stores a Telegram destination with JSONB configuration and filters.
 type NotificationChannel struct {
 	ID     int64           `json:"id"`
 	Name   string          `json:"name"`
-	Kind   string          `json:"kind"`
 	Mode   string          `json:"mode"`
 	Config json.RawMessage `json:"config"`
 	Filter json.RawMessage `json:"filter"`
@@ -65,32 +62,22 @@ type NotificationChannel struct {
 // IsEnabled treats an unloaded, nil flag as enabled.
 func (c *NotificationChannel) IsEnabled() bool { return c.Enabled == nil || *c.Enabled }
 
-// NotificationEvent represents a finding event.
-type NotificationEvent struct {
-	ID        int64           `json:"id"`
-	Kind      string          `json:"kind"`
-	FindingID int64           `json:"finding_id"`
-	Snapshot  json.RawMessage `json:"snapshot"`
-	CreatedAt time.Time       `json:"created_at"`
-}
-
-const notificationChannelCols = `id, name, kind, enabled, config, mode, filter, rate_per_min, created_at, updated_at`
+const notificationChannelCols = `id, name, enabled, config, mode, filter, rate_per_min, created_at, updated_at`
 
 func scanNotificationChannel(sc interface{ Scan(...any) error }) (*NotificationChannel, error) {
 	var c NotificationChannel
 	var enabled bool
-	if err := sc.Scan(&c.ID, &c.Name, &c.Kind, &enabled, &c.Config, &c.Mode, &c.Filter, &c.RatePerMin, &c.CreatedAt, &c.UpdatedAt); err != nil {
+	if err := sc.Scan(&c.ID, &c.Name, &enabled, &c.Config, &c.Mode, &c.Filter, &c.RatePerMin, &c.CreatedAt, &c.UpdatedAt); err != nil {
 		return nil, err
 	}
 	c.Enabled = &enabled
 	return &c, nil
 }
 
-// ListNotificationChannels puts enabled channels first and sorts each group by ID for a stable
-// UI and dispatcher order.
+// ListNotificationChannels lists Telegram destinations. Legacy rows remain stored but inactive.
 func (d *DB) ListNotificationChannels(ctx context.Context) ([]*NotificationChannel, error) {
 	rows, err := d.QueryContext(ctx, `SELECT `+notificationChannelCols+` FROM notification_channels
-ORDER BY enabled DESC, id`)
+WHERE kind=$1 ORDER BY enabled DESC, id`, notify.KindTelegram)
 	if err != nil {
 		return nil, err
 	}
@@ -106,9 +93,9 @@ ORDER BY enabled DESC, id`)
 	return out, rows.Err()
 }
 
-// NotificationChannelByID retrieves a channel.
+// NotificationChannelByID retrieves a Telegram destination.
 func (d *DB) NotificationChannelByID(ctx context.Context, id int64) (*NotificationChannel, error) {
-	row := d.QueryRowContext(ctx, `SELECT `+notificationChannelCols+` FROM notification_channels WHERE id=$1`, id)
+	row := d.QueryRowContext(ctx, `SELECT `+notificationChannelCols+` FROM notification_channels WHERE id=$1 AND kind=$2`, id, notify.KindTelegram)
 	c, err := scanNotificationChannel(row)
 	if err == sql.ErrNoRows {
 		return nil, ErrNotificationChannelNotFound
@@ -116,10 +103,8 @@ func (d *DB) NotificationChannelByID(ctx context.Context, id int64) (*Notificati
 	return c, err
 }
 
-// SaveNotificationChannel creates or updates a channel.
-//
-// Update only supplied fields. Partial updates preserve secrets that are omitted or masked in
-// the UI.
+// SaveNotificationChannel stores a Telegram destination. Disabling a destination skips unsent
+// deliveries so re-enabling it does not send an obsolete backlog.
 func (d *DB) SaveNotificationChannel(ctx context.Context, c *NotificationChannel) (int64, error) {
 	if c.Mode == "" {
 		c.Mode = NotifyModeRealtime
@@ -145,48 +130,39 @@ func (d *DB) SaveNotificationChannel(ctx context.Context, c *NotificationChannel
 		var id int64
 		err := d.QueryRowContext(ctx, `INSERT INTO notification_channels(name,kind,enabled,config,mode,filter,rate_per_min)
 VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
-			c.Name, c.Kind, enabled, string(c.Config), c.Mode, string(c.Filter), c.RatePerMin).Scan(&id)
+			c.Name, notify.KindTelegram, enabled, string(c.Config), c.Mode, string(c.Filter), c.RatePerMin).Scan(&id)
 		return id, err
 	}
-	res, err := d.ExecContext(ctx, `UPDATE notification_channels
-SET name=$2, kind=$3, enabled=$4, config=$5, mode=$6, filter=$7, rate_per_min=$8
-WHERE id=$1`,
-		c.ID, c.Name, c.Kind, enabled, string(c.Config), c.Mode, string(c.Filter), c.RatePerMin)
+	tx, err := d.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
+	defer tx.Rollback()
+	var wasEnabled bool
+	err = tx.QueryRowContext(ctx, `SELECT enabled FROM notification_channels WHERE id=$1 AND kind=$2 FOR UPDATE`, c.ID, notify.KindTelegram).Scan(&wasEnabled)
+	if err == sql.ErrNoRows {
 		return 0, ErrNotificationChannelNotFound
 	}
-	return c.ID, nil
-}
-
-// SetNotificationChannelEnabled toggles delivery.
-//
-// Skip unsent deliveries on disable so re-enabling does not deliver stale findings as new.
-func (d *DB) SetNotificationChannelEnabled(ctx context.Context, id int64, enabled bool) error {
-	return d.WithEvidenceTx(ctx, func(tx *sql.Tx) error {
-		res, err := tx.ExecContext(ctx, `UPDATE notification_channels SET enabled=$2 WHERE id=$1`, id, enabled)
-		if err != nil {
-			return err
+	if err != nil {
+		return 0, err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE notification_channels
+SET name=$2, enabled=$3, config=$4, mode=$5, filter=$6, rate_per_min=$7 WHERE id=$1`,
+		c.ID, c.Name, enabled, string(c.Config), c.Mode, string(c.Filter), c.RatePerMin); err != nil {
+		return 0, err
+	}
+	if wasEnabled && !enabled {
+		if _, err := tx.ExecContext(ctx, `UPDATE notification_deliveries SET state=$2, last_error=$3
+WHERE channel_id=$1 AND state IN ($4,$5)`, c.ID, NotifyStateSkipped, "渠道已停用", NotifyStatePending, NotifyStateSending); err != nil {
+			return 0, err
 		}
-		if n, _ := res.RowsAffected(); n == 0 {
-			return ErrNotificationChannelNotFound
-		}
-		if !enabled {
-			if _, err := tx.ExecContext(ctx, `UPDATE notification_deliveries SET state=$2, last_error=$3
-WHERE channel_id=$1 AND state IN ($4,$5)`,
-				id, NotifyStateSkipped, "渠道已停用", NotifyStatePending, NotifyStateSending); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
+	}
+	return c.ID, tx.Commit()
 }
 
 // DeleteNotificationChannel removes a channel and cascades to its delivery history.
 func (d *DB) DeleteNotificationChannel(ctx context.Context, id int64) error {
-	res, err := d.ExecContext(ctx, `DELETE FROM notification_channels WHERE id=$1`, id)
+	res, err := d.ExecContext(ctx, `DELETE FROM notification_channels WHERE id=$1 AND kind=$2`, id, notify.KindTelegram)
 	if err != nil {
 		return err
 	}
@@ -269,29 +245,30 @@ func (d *DB) FanOutPendingEvents(ctx context.Context, limit int) (eventCount, de
 	if err != nil {
 		return 0, 0, err
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT id, kind, finding_id, snapshot FROM notification_events
+	rows, err := tx.QueryContext(ctx, `SELECT id, kind, snapshot FROM notification_events
 WHERE NOT fanned_out ORDER BY id FOR UPDATE SKIP LOCKED LIMIT $1`, limit)
 	if err != nil {
 		return 0, 0, err
 	}
-	var (
-		events      []NotificationEvent
-		parsedSnaps []notify.Snapshot
-	)
+	type pendingEvent struct {
+		id       int64
+		snapshot notify.Snapshot
+	}
+	var events []pendingEvent
 	for rows.Next() {
-		var ev NotificationEvent
-		if err := rows.Scan(&ev.ID, &ev.Kind, &ev.FindingID, &ev.Snapshot); err != nil {
+		var ev pendingEvent
+		var kind string
+		var raw json.RawMessage
+		if err := rows.Scan(&ev.id, &kind, &raw); err != nil {
 			rows.Close()
 			return 0, 0, err
 		}
-		var snap notify.Snapshot
 		// Keep dispatching if a stored snapshot fails to decode. Channels with filters may skip that
 		// event.
-		_ = json.Unmarshal(ev.Snapshot, &snap)
+		_ = json.Unmarshal(raw, &ev.snapshot)
 		// Use the row's kind as authoritative over legacy snapshot values.
-		snap.Kind = ev.Kind
+		ev.snapshot.Kind = kind
 		events = append(events, ev)
-		parsedSnaps = append(parsedSnaps, snap)
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
@@ -306,12 +283,12 @@ WHERE NOT fanned_out ORDER BY id FOR UPDATE SKIP LOCKED LIMIT $1`, limit)
 		channelID int64
 	}
 	var toInsert []pending
-	for i, snap := range parsedSnaps {
+	for _, ev := range events {
 		for _, ch := range channels {
-			if !notify.Match(notify.ParseFilter(ch.Filter), snap) {
+			if !notify.Match(ch.filter, ev.snapshot) {
 				continue
 			}
-			toInsert = append(toInsert, pending{eventID: events[i].ID, channelID: ch.ID})
+			toInsert = append(toInsert, pending{eventID: ev.id, channelID: ch.id})
 		}
 	}
 	if len(toInsert) > 0 {
@@ -332,7 +309,7 @@ WHERE NOT fanned_out ORDER BY id FOR UPDATE SKIP LOCKED LIMIT $1`, limit)
 	ids := make([]string, 0, len(events))
 	markArgs := make([]any, 0, len(events))
 	for _, ev := range events {
-		markArgs = append(markArgs, ev.ID)
+		markArgs = append(markArgs, ev.id)
 		ids = append(ids, fmt.Sprintf("$%d", len(markArgs)))
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE notification_events SET fanned_out=true WHERE id IN (`+strings.Join(ids, ",")+`)`, markArgs...); err != nil {
@@ -341,22 +318,28 @@ WHERE NOT fanned_out ORDER BY id FOR UPDATE SKIP LOCKED LIMIT $1`, limit)
 	return len(events), len(toInsert), tx.Commit()
 }
 
-// Load enabled channels inside the transaction without a cache so changes are immediately
-// reflected.
-func listEnabledNotificationChannelsTx(ctx context.Context, tx *sql.Tx) ([]*NotificationChannel, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT id, name, kind, config, mode, filter, rate_per_min
-FROM notification_channels WHERE enabled ORDER BY id`)
+type notificationRoute struct {
+	id     int64
+	filter notify.Filter
+}
+
+// Load current filters in the dispatch transaction and parse each once per batch.
+func listEnabledNotificationChannelsTx(ctx context.Context, tx *sql.Tx) ([]notificationRoute, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT id, filter FROM notification_channels
+WHERE enabled AND kind=$1 ORDER BY id`, notify.KindTelegram)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	out := []*NotificationChannel{}
+	var out []notificationRoute
 	for rows.Next() {
-		var c NotificationChannel
-		if err := rows.Scan(&c.ID, &c.Name, &c.Kind, &c.Config, &c.Mode, &c.Filter, &c.RatePerMin); err != nil {
+		var route notificationRoute
+		var raw json.RawMessage
+		if err := rows.Scan(&route.id, &raw); err != nil {
 			return nil, err
 		}
-		out = append(out, &c)
+		route.filter = notify.ParseFilter(raw)
+		out = append(out, route)
 	}
 	return out, rows.Err()
 }
@@ -506,14 +489,16 @@ type NotificationStats struct {
 // even when only a few items are pending.
 func (d *DB) NotificationStatsSnapshot(ctx context.Context) (*NotificationStats, error) {
 	var s NotificationStats
-	if err := d.QueryRowContext(ctx, `SELECT
-    (SELECT count(*) FROM notification_channels),
-    (SELECT count(*) FROM notification_channels WHERE enabled),
-    (SELECT count(*) FROM notification_deliveries WHERE state IN ($1,$2)),
-    (SELECT count(*) FROM notification_deliveries WHERE state=$3),
-    (SELECT count(*) FROM notification_deliveries WHERE state=$4 AND sent_at >= date_trunc('day', now())),
-    COALESCE((SELECT EXTRACT(EPOCH FROM (now() - min(created_at))) * 1000 FROM notification_deliveries WHERE state=$1), 0)::bigint`,
-		NotifyStatePending, NotifyStateSending, NotifyStateFailed, NotifyStateSent).
+	if err := d.QueryRowContext(ctx, `WITH channels AS (SELECT id, enabled FROM notification_channels WHERE kind=$1)
+SELECT
+    (SELECT count(*) FROM channels),
+    (SELECT count(*) FROM channels WHERE enabled),
+    count(*) FILTER (WHERE d.state IN ($2,$3)),
+    count(*) FILTER (WHERE d.state=$4),
+    count(*) FILTER (WHERE d.state=$5 AND d.sent_at >= date_trunc('day', now())),
+    COALESCE(EXTRACT(EPOCH FROM (now() - min(d.created_at) FILTER (WHERE d.state=$2))) * 1000, 0)::bigint
+FROM notification_deliveries d JOIN channels c ON c.id=d.channel_id`,
+		notify.KindTelegram, NotifyStatePending, NotifyStateSending, NotifyStateFailed, NotifyStateSent).
 		Scan(&s.Channels, &s.ChannelsOn, &s.Pending, &s.Failed, &s.SentToday, &s.BacklogAgeMS); err != nil {
 		return nil, err
 	}

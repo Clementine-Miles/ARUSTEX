@@ -963,26 +963,30 @@ export interface NotificationFilter {
   on_status_change?: boolean; // Include finding status-change events.
 }
 
-// Channel instance with kind-specific configuration. Credential fields are returned as __masked__ values. Send
-// the same value to keep a credential.
+// The API returns a masked bot token. Send the mask unchanged to retain the stored token.
+export interface TelegramChannelConfig {
+  bot_token?: string;
+  chat_id?: string;
+  base_url?: string;
+}
+
 export interface NotificationChannel {
   id: number;
   name: string;
-  kind: string;
+  kind: "telegram";
   enabled: boolean;
   mode: "realtime" | "digest";
-  config: Record<string, unknown>;
+  config: TelegramChannelConfig;
   filter: NotificationFilter;
   rate_per_min: number;
   created_at: string;
   updated_at: string;
-  // The server supplies secret_keys by channel kind. The UI uses them for password inputs and hints.
   secret_keys: string[];
 }
 
 // Channel kind metadata returned by /api/notify/meta.
 export interface NotificationKind {
-  kind: string;
+  kind: "telegram";
   default_rate_per_min: number;
   secret_keys: string[];
 }
@@ -1010,7 +1014,7 @@ export interface NotificationDelivery {
   event_kind: string; // finding_created | finding_status_changed
   channel_id: number;
   channel_name: string;
-  channel_kind: string;
+  channel_kind: "telegram";
   state: "pending" | "sending" | "sent" | "failed" | "skipped";
   attempts: number;
   last_error: string;

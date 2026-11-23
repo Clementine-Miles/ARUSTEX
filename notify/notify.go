@@ -1,19 +1,7 @@
-// Package notify implements finding notifications for messaging and email channels.
-//
-// This package depends only on the standard library. The server orchestrates delivery and passes JSONB-backed configuration as a map and the notification as a Message.
-//
-// Channel implementations are stateless and shared by concurrent deliveries. Read credentials from cfg on every call.
+// Package notify formats and delivers finding notifications through Telegram.
 package notify
 
-// Supported channel kinds are validated by the server so adding a channel does not require a database constraint migration.
-const (
-	KindDingTalk = "dingtalk" // DingTalk custom robot
-	KindFeishu   = "feishu"   // Feishu and Lark custom robot
-	KindWeCom    = "wecom"    // WeCom group robot
-	KindWebhook  = "webhook"  // Generic webhook with configurable method, headers, and JSON template
-	KindTelegram = "telegram" // Telegram Bot API
-	KindEmail    = "email"    // SMTP email
-)
+const KindTelegram = "telegram"
 
 // Event types correspond to notification_events.kind.
 const (
@@ -21,66 +9,66 @@ const (
 	EventFindingStatusChanged = "finding_status_changed"
 )
 
-// InitKind supplies the fallback for an empty channel kind.
-const InitKind = KindDingTalk
-
-// severityRank orders finding severities. An unknown severity ranks below known values and is filtered when a minimum is set.
-var severityRank = map[string]int{
-	"low":      1,
-	"medium":   2,
-	"high":     3,
-	"critical": 4,
+// Snapshot is the notification_events.snapshot JSONB payload written by
+// finding transactions and read by the notification engine.
+//
+// Copy finding fields so routing and rendering reflect the event as recorded.
+// Later changes must not alter earlier notifications.
+type Snapshot struct {
+	// Kind is finding_created or finding_status_changed.
+	Kind      string  `json:"kind"`
+	FindingID int64   `json:"finding_id"`
+	TaskID    int64   `json:"task_id"`
+	VulnClass string  `json:"vulnclass"`
+	Name      string  `json:"name"`
+	Severity  string  `json:"severity"`
+	Summary   string  `json:"summary"`
+	AssetIDs  []int64 `json:"asset_ids"`
+	// Status fields are populated for finding_status_changed.
+	FromStatus string `json:"from_status,omitempty"`
+	ToStatus   string `json:"to_status,omitempty"`
 }
 
-// SeverityRank returns the severity rank, or zero when unknown.
-func SeverityRank(severity string) int { return severityRank[severity] }
-
-// SeverityLabel returns a localized severity label with an emoji. Unknown labels pass through unchanged.
-func SeverityLabel(severity string) string {
-	switch severity {
-	case "critical":
-		return "🔴 严重"
-	case "high":
-		return "🟠 高危"
-	case "medium":
-		return "🟡 中危"
-	case "low":
-		return "🔵 低危"
-	default:
-		return severity
-	}
+// Item is a finding prepared for channel rendering.
+type Item struct {
+	FindingID int64
+	Name      string
+	VulnClass string
+	Severity  string
+	Summary   string
+	// Assets contains display names such as domains or IPs, resolved by the server.
+	Assets []string
+	// DetailURL links to the finding and is empty when public_base_url is unset.
+	DetailURL string
+	// FromStatus and ToStatus describe the transition in a status notification.
+	FromStatus string
+	ToStatus   string
 }
 
-// StatusLabel translates a finding status for a status-change message.
-func StatusLabel(status string) string {
-	switch status {
-	case "pending":
-		return "待处理"
-	case "in_progress":
-		return "处理中"
-	case "confirmed":
-		return "已确认"
-	case "resolved":
-		return "已处理"
-	case "fixed":
-		return "已修复"
-	case "false_positive":
-		return "误报"
-	case "ignored":
-		return "忽略"
-	case "duplicate":
-		return "重复"
-	case "risk_accepted":
-		return "风险接受"
-	default:
-		return status
+// IsStatusChange reports whether the item represents a status transition.
+func (i Item) IsStatusChange() bool { return i.FromStatus != "" || i.ToStatus != "" }
+
+// Title uses the saved name or finding class and falls back to a placeholder.
+func (i Item) Title() string {
+	if i.Name != "" {
+		return i.Name
 	}
+	if i.VulnClass != "" {
+		return i.VulnClass
+	}
+	return "(未命名漏洞)"
 }
 
-// AtLeast compares severity with min. An empty minimum accepts any severity, and a nonempty minimum rejects unknown severities.
-func AtLeast(severity, min string) bool {
-	if min == "" {
-		return true
-	}
-	return SeverityRank(severity) >= SeverityRank(min)
+// Message is the full payload for one channel delivery.
+type Message struct {
+	// Items contains one finding for immediate delivery or several for a digest.
+	// The caller must supply at least one item.
+	Items []Item
+	// Batch selects the digest title, time window, and count.
+	Batch bool
+	// WindowMinutes is the configured digest window. Supplying it explicitly keeps
+	// rendering deterministic.
+	WindowMinutes int
+	// HomeURL links to the dashboard and is omitted when public_base_url is unset.
+	HomeURL string
 }

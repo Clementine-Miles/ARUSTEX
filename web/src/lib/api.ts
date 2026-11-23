@@ -91,6 +91,7 @@ import type {
   TaskNode,
   TaskScopeRow,
   TaskTemplate,
+  TelegramChannelConfig,
   TokenTotal,
   TokenUsage,
   Tool,
@@ -814,16 +815,14 @@ export const api = {
     tavily_search_api_key?: string;
   }) => post<{ ok: boolean; error?: string; count?: number; backend?: string }>(`/settings/web-search/test`, patch),
 
-  // Notification channels can have several instances of a single type, each with independent filtering.
+  // Multiple Telegram destinations can use independent filters and delivery modes.
   notifyMeta: () => get<NotificationMeta>(`/notify/meta`),
-  notifyChannels: () =>
-    get<{ channels: NotificationChannel[] }>(`/notify/channels`).then((r) => arr(r.channels)),
+  notifyChannels: () => get<{ channels: NotificationChannel[] }>(`/notify/channels`).then((r) => arr(r.channels)),
   notifyCreateChannel: (payload: {
     name: string;
-    kind: string;
     enabled?: boolean;
-    mode?: string;
-    config: Record<string, unknown>;
+    mode?: NotificationChannel["mode"];
+    config: TelegramChannelConfig;
     filter?: NotificationFilter;
     rate_per_min?: number;
   }) => post<{ id: number }>(`/notify/channels`, payload),
@@ -832,10 +831,9 @@ export const api = {
     id: number,
     payload: {
       name?: string;
-      kind?: string;
       enabled?: boolean;
-      mode?: string;
-      config?: Record<string, unknown>;
+      mode?: NotificationChannel["mode"];
+      config?: TelegramChannelConfig;
       filter?: NotificationFilter;
       rate_per_min?: number;
     },

@@ -16,31 +16,20 @@ import (
 	"time"
 )
 
-// AllowLocalTargetsEnv opts in to delivery to otherwise blocked address classes.
-//
-// Block sensitive local targets by default. Delivery errors may include a
-// response excerpt, so connecting to a local service can expose its data.
-//
-// ARTEX_NOTIFY_ALLOW_LOCAL=1 is an explicit opt-in for deployments that use
-// local relays or receivers.
-//
-// Tests use AllowLocalTargetsEnv when delivering to local fixtures.
+// AllowLocalTargetsEnv opts in to otherwise blocked targets for local relays.
 const AllowLocalTargetsEnv = "ARTEX_NOTIFY_ALLOW_LOCAL"
 
 func allowLocalTargets() bool {
-	v := strings.TrimSpace(os.Getenv(AllowLocalTargetsEnv))
-	return v == "1" || strings.EqualFold(v, "true")
+	value := strings.TrimSpace(os.Getenv(AllowLocalTargetsEnv))
+	return value == "1" || strings.EqualFold(value, "true")
 }
 
-// isBlockedDialIP reports whether an address is blocked for direct delivery.
-//
-// Block loopback, link-local, unspecified, and multicast addresses. Private
-// network addresses are permitted for operator-managed relays and webhooks.
+// isBlockedDialIP allows private addresses for operator-managed relays while
+// blocking loopback, link-local, unspecified, and multicast destinations.
 func isBlockedDialIP(ip net.IP) bool {
 	if ip == nil {
 		return true
 	}
-	// Unmap IPv4-mapped IPv6 addresses before applying the IPv4 checks.
 	if v4 := ip.To4(); v4 != nil {
 		ip = v4
 	}
@@ -48,10 +37,11 @@ func isBlockedDialIP(ip net.IP) bool {
 		ip.IsInterfaceLocalMulticast() || ip.IsUnspecified() || ip.IsMulticast()
 }
 
-// blockInternalDial checks the destination address at connection time.
-//
-// Check each direct dial so a fresh DNS lookup or redirected request cannot
-// bypass the configuration-time policy.
+func localTargetError(ip net.IP) error {
+	return fmt.Errorf("拒绝投递到本机/链路本地地址 %s（如确需投递到本机服务，设置 %s=1）", ip, AllowLocalTargetsEnv)
+}
+
+// blockInternalDial checks the resolved IP on each direct dial.
 func blockInternalDial(_, address string, _ syscall.RawConn) error {
 	if allowLocalTargets() {
 		return nil
@@ -65,162 +55,125 @@ func blockInternalDial(_, address string, _ syscall.RawConn) error {
 		return fmt.Errorf("无法解析目标地址 %q", host)
 	}
 	if isBlockedDialIP(ip) {
-		return fmt.Errorf("拒绝投递到本机/链路本地地址 %s（如确需投递到本机服务，设置 %s=1）", ip, AllowLocalTargetsEnv)
+		return localTargetError(ip)
 	}
 	return nil
 }
 
-// notifyTransport adds the dial guard while retaining the default pool, proxy,
-// HTTP/2, and timeout settings.
-var notifyTransport = func() *http.Transport {
-	t, ok := http.DefaultTransport.(*http.Transport)
-	if !ok {
-		return &http.Transport{}
-	}
-	clone := t.Clone()
-	clone.DialContext = (&net.Dialer{Timeout: 10 * time.Second, Control: blockInternalDial}).DialContext
-	return clone
-}()
-
-// httpClient is shared by HTTP notification channels.
-//
-// Delivery uses its own client and a 15-second timeout, independent of the
-// application's assessment proxy.
-//
-// Refuse redirects to a different host to protect credentials embedded in
-// delivery URLs. Same-host redirects remain supported.
-var httpClient = &http.Client{
+var telegramClient = &http.Client{
 	Timeout:   15 * time.Second,
-	Transport: notifyTransport,
+	Transport: telegramTransport(),
 	CheckRedirect: func(req *http.Request, via []*http.Request) error {
 		if len(via) >= 5 {
 			return errors.New("重定向次数过多")
 		}
-		if len(via) > 0 && req.URL.Host != via[0].URL.Host {
-			return fmt.Errorf("拒绝跨主机重定向（%s → %s）", via[0].URL.Host, req.URL.Host)
+		if len(via) > 0 && (req.URL.Scheme != via[0].URL.Scheme || req.URL.Host != via[0].URL.Host || req.URL.User != nil) {
+			return errors.New("拒绝跨来源重定向")
 		}
 		return nil
 	},
 }
 
-// respBodyLimit caps response reads. Error reporting needs only a short excerpt.
-const respBodyLimit = 8 << 10
+func telegramTransport() *http.Transport {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	// Keep resolution and connection under the dial guard. A generic proxy
+	// would resolve and connect to the relay on ARTEX's behalf.
+	transport.Proxy = nil
+	transport.DialContext = (&net.Dialer{Timeout: 10 * time.Second, Control: blockInternalDial}).DialContext
+	return transport
+}
 
-// doJSON sends one request and returns its bounded response body.
-//
-// A nil payload sends no body. The generic webhook can supply custom headers.
-//
-// Network errors, 5xx, 408, and 429 are retryable. Other 4xx responses indicate
-// permanent failures.
-func doJSON(ctx context.Context, method, url string, headers map[string]string, payload any) ([]byte, error) {
-	var body io.Reader
-	if payload != nil {
-		raw, err := json.Marshal(payload)
-		if err != nil {
-			// Encoding failures are local errors and will not improve with a retry.
-			return nil, Permanent(fmt.Errorf("构造请求体失败: %w", err))
-		}
-		body = bytes.NewReader(raw)
-	}
-	req, err := http.NewRequestWithContext(ctx, method, url, body)
+// PermanentError marks a delivery failure that retries cannot resolve.
+type PermanentError struct{ Err error }
+
+func (e *PermanentError) Error() string { return e.Err.Error() }
+func (e *PermanentError) Unwrap() error { return e.Err }
+
+// IsPermanent reports whether err wraps a permanent delivery failure.
+func IsPermanent(err error) bool {
+	var permanent *PermanentError
+	return errors.As(err, &permanent)
+}
+
+const responseLimit = 8 << 10
+
+func postTelegramJSON(ctx context.Context, endpoint, token string, payload any) ([]byte, error) {
+	body, err := json.Marshal(payload)
 	if err != nil {
-		// Treat invalid URLs as permanent. Hide parse errors because they include the
-		// original destination.
-		return nil, Permanent(fmt.Errorf("请求地址非法: %s", redactRequestTarget(url)))
+		return nil, &PermanentError{Err: fmt.Errorf("构造请求体失败: %w", err)}
 	}
-	if payload != nil {
-		req.Header.Set("Content-Type", "application/json; charset=utf-8")
-	}
-	for k, v := range headers {
-		req.Header.Set(k, v)
-	}
-	resp, err := httpClient.Do(req)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
-		// Retry connection failures with backoff.
-		//
-		// Redact transport errors before exposing them to logs, delivery history or API
-		// clients. The URL can itself contain a credential.
-		return nil, fmt.Errorf("请求失败: %s", redactTransportError(err))
+		return nil, &PermanentError{Err: errors.New("Telegram 请求地址无效")}
+	}
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	resp, err := telegramClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("请求失败: %s", redactTelegramError(transportErrorText(err), token))
 	}
 	defer resp.Body.Close()
-	raw, readErr := io.ReadAll(io.LimitReader(resp.Body, respBodyLimit))
-	if readErr != nil {
-		return nil, fmt.Errorf("读取响应失败: %w", readErr)
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, responseLimit))
+	if err != nil {
+		return nil, fmt.Errorf("读取响应失败: %s", redactTelegramError(err.Error(), token))
 	}
-	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+	switch {
+	case resp.StatusCode >= 200 && resp.StatusCode < 300:
 		return raw, nil
+	case resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusRequestTimeout:
+		return nil, fmt.Errorf("对方限流或超时 (HTTP %d): %s", resp.StatusCode, responseSnippet(string(raw), token))
+	case resp.StatusCode >= 500:
+		return nil, fmt.Errorf("对方服务异常 (HTTP %d): %s", resp.StatusCode, responseSnippet(string(raw), token))
+	default:
+		return nil, &PermanentError{Err: fmt.Errorf("对方拒绝请求 (HTTP %d): %s", resp.StatusCode, responseSnippet(string(raw), token))}
 	}
-	// Retry rate limits and timeouts. The remaining 4xx responses are permanent.
-	if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusRequestTimeout {
-		return nil, fmt.Errorf("对方限流或超时 (HTTP %d): %s", resp.StatusCode, snippet(raw))
-	}
-	if resp.StatusCode >= 500 {
-		return nil, fmt.Errorf("对方服务异常 (HTTP %d): %s", resp.StatusCode, snippet(raw))
-	}
-	return nil, Permanent(fmt.Errorf("对方拒绝请求 (HTTP %d): %s", resp.StatusCode, snippet(raw)))
 }
 
-// snippet returns a short, single-line error excerpt for delivery history.
-func snippet(raw []byte) string {
-	return OneLine(string(raw), 200)
+func responseSnippet(body, token string) string {
+	return oneLine(redactTelegramError(body, token), 200)
 }
 
-// redactRequestTarget retains only the scheme and host for diagnostics.
-//
-// Credentials may appear in any other part of a webhook URL.
-//
-// DingTalk and WeCom carry credentials in query parameters. Feishu and Telegram
-// carry credentials in URL paths.
-//
-// Retaining the host is enough for network diagnostics without exposing the bot.
-//
-// Use a fixed placeholder for an unparseable address.
-func redactRequestTarget(raw string) string {
-	u, err := url.Parse(raw)
-	if err != nil || u.Host == "" {
-		return "(地址不可解析)"
-	}
-	return u.Scheme + "://" + u.Host + "/…"
-}
-
-// redactTransportError removes the request destination from a transport error.
-//
-// Unwrap *url.Error to avoid printing its raw URL.
-func redactTransportError(err error) string {
+// transportErrorText unwraps the standard client error without printing the
+// token-bearing request URL.
+func transportErrorText(err error) string {
 	var uerr *url.Error
 	if errors.As(err, &uerr) {
 		host := ""
 		if u, parseErr := url.Parse(uerr.URL); parseErr == nil {
 			host = u.Host
 		}
-		if uerr.Err != nil {
-			return fmt.Sprintf("%s %s: %s", uerr.Op, host, uerr.Err)
-		}
-		return fmt.Sprintf("%s %s: 未知错误", uerr.Op, host)
+		return fmt.Sprintf("%s %s: %v", uerr.Op, host, uerr.Err)
 	}
-	// Redact URL text in unstructured errors, including redirect errors.
-	return redactURLsInText(err.Error())
+	return err.Error()
 }
 
-// redactURLsInText redacts HTTP(S) URLs in a diagnostic message.
-//
-// This is a fallback for errors without structured URL fields. Quotes and
-// whitespace delimit URL tokens.
-func redactURLsInText(s string) string {
+// redactTelegramError removes the current token and URL path, query, and user
+// info from diagnostics that can reach the API, logs, and delivery history.
+func redactTelegramError(text, token string) string {
+	if token != "" {
+		text = strings.NewReplacer(
+			token, "[redacted]",
+			url.PathEscape(token), "[redacted]",
+			url.QueryEscape(token), "[redacted]",
+		).Replace(text)
+	}
 	var b strings.Builder
-	for i := 0; i < len(s); {
-		rest := s[i:]
-		if strings.HasPrefix(rest, "http://") || strings.HasPrefix(rest, "https://") {
-			end := len(rest)
-			if j := strings.IndexAny(rest, " \t\n\"'"); j >= 0 {
-				end = j
-			}
-			b.WriteString(redactRequestTarget(rest[:end]))
-			i += end
+	for i := 0; i < len(text); {
+		rest := text[i:]
+		if !strings.HasPrefix(rest, "http://") && !strings.HasPrefix(rest, "https://") {
+			b.WriteByte(text[i])
+			i++
 			continue
 		}
-		b.WriteByte(s[i])
-		i++
+		end := len(rest)
+		if j := strings.IndexAny(rest, " \t\r\n\"'"); j >= 0 {
+			end = j
+		}
+		if u, err := url.Parse(rest[:end]); err == nil && u.Host != "" {
+			b.WriteString(u.Scheme + "://" + u.Host + "/…")
+		} else {
+			b.WriteString("(地址不可解析)")
+		}
+		i += end
 	}
 	return b.String()
 }

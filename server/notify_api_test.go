@@ -136,17 +136,20 @@ func (f *notifyFixture) createChannel(t *testing.T, payload map[string]any) int6
 	return res.ID
 }
 
-// fakeWebhook records bodies received by the synthetic endpoint.
-type fakeWebhook struct {
+// fakeTelegram records bodies received by the synthetic endpoint.
+type fakeTelegram struct {
 	*httptest.Server
 	mu     sync.Mutex
 	bodies []map[string]any
 }
 
-func newFakeWebhook(t *testing.T) *fakeWebhook {
+func newFakeTelegram(t *testing.T) *fakeTelegram {
 	t.Helper()
-	f := &fakeWebhook{}
+	f := &fakeTelegram{}
 	f.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/bot123456:fixture-telegram-token/sendMessage" {
+			t.Errorf("Unexpected Telegram request %s %s", r.Method, r.URL.Path)
+		}
 		raw, _ := io.ReadAll(r.Body)
 		var body map[string]any
 		_ = json.Unmarshal(raw, &body)
@@ -154,19 +157,19 @@ func newFakeWebhook(t *testing.T) *fakeWebhook {
 		f.bodies = append(f.bodies, body)
 		f.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `{"errcode":0,"errmsg":"ok"}`)
+		_, _ = io.WriteString(w, `{"ok":true}`)
 	}))
 	t.Cleanup(f.Close)
 	return f
 }
 
-func (f *fakeWebhook) count() int {
+func (f *fakeTelegram) count() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return len(f.bodies)
 }
 
-func (f *fakeWebhook) body(t *testing.T, i int) map[string]any {
+func (f *fakeTelegram) body(t *testing.T, i int) map[string]any {
 	t.Helper()
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -176,7 +179,7 @@ func (f *fakeWebhook) body(t *testing.T, i int) map[string]any {
 	return f.bodies[i]
 }
 
-func (f *fakeWebhook) last(t *testing.T) map[string]any {
+func (f *fakeTelegram) last(t *testing.T) map[string]any {
 	t.Helper()
 	if f.count() == 0 {
 		t.Fatal("假接收端没有收到任何请求")
@@ -184,22 +187,18 @@ func (f *fakeWebhook) last(t *testing.T) map[string]any {
 	return f.body(t, f.count()-1)
 }
 
-// markdownText reads either the text or content field used by the notification formats.
-func markdownText(t *testing.T, body map[string]any) string {
+// telegramText extracts the HTML body sent to the synthetic Bot API.
+func telegramText(t *testing.T, body map[string]any) string {
 	t.Helper()
-	for _, key := range []string{"markdown", "actionCard"} {
-		section, ok := body[key].(map[string]any)
-		if !ok {
-			continue
-		}
-		for _, field := range []string{"text", "content"} {
-			if s, ok := section[field].(string); ok && s != "" {
-				return s
-			}
-		}
+	if text, ok := body["text"].(string); ok && text != "" && body["parse_mode"] == "HTML" {
+		return text
 	}
-	t.Fatalf("请求体里没有可识别的正文: %v", body)
+	t.Fatalf("Expected a Telegram HTML payload, got %v", body)
 	return ""
+}
+
+func telegramTestConfig(baseURL string) map[string]any {
+	return map[string]any{"base_url": baseURL, "bot_token": "123456:fixture-telegram-token", "chat_id": "123"}
 }
 
 // agePendingBatch makes pending deliveries old enough to test a due digest.
@@ -213,11 +212,11 @@ WHERE channel_id=$1 AND state=$2`, chID, db.NotifyStatePending); err != nil {
 
 func TestNotifyEndToEndRealtimeDelivery(t *testing.T) {
 	f := newNotifyFixture(t)
-	hook := newFakeWebhook(t)
+	hook := newFakeTelegram(t)
 	chID := f.createChannel(t, map[string]any{
 		"name":   "实时推送",
-		"kind":   notify.KindDingTalk,
-		"config": map[string]any{"webhook": hook.URL},
+		"kind":   notify.KindTelegram,
+		"config": telegramTestConfig(hook.URL),
 	})
 	f.record(t, "SQL注入", "high")
 	f.deliver(t, chID, "")
@@ -225,7 +224,7 @@ func TestNotifyEndToEndRealtimeDelivery(t *testing.T) {
 	if hook.count() != 1 {
 		t.Fatalf("应发出 1 条消息，实际 %d", hook.count())
 	}
-	text := markdownText(t, hook.last(t))
+	text := telegramText(t, hook.last(t))
 	for _, want := range []string{"SQL注入", "高危", "摘要"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("消息正文缺少 %q:\n%s", want, text)
@@ -244,17 +243,17 @@ func TestNotifyEndToEndRealtimeDelivery(t *testing.T) {
 
 func TestNotifyChannelAPIMasksSecretsAndPreservesOnUpdate(t *testing.T) {
 	f := newNotifyFixture(t)
+	cfg := telegramTestConfig("https://telegram.example.com")
 	chID := f.createChannel(t, map[string]any{
 		"name":   "掩码用例",
-		"kind":   notify.KindDingTalk,
-		"config": map[string]any{"webhook": "https://oapi.dingtalk.com/robot/send?access_token=abc123456", "secret": "SECabcdef123456"},
+		"config": cfg,
 	})
 
 	r := f.request("GET", "/api/notify/channels", "")
 	if r.Code != 200 {
 		t.Fatalf("列渠道失败 %d: %s", r.Code, r.Body)
 	}
-	if strings.Contains(r.Body.String(), "abc123456") || strings.Contains(r.Body.String(), "SECabcdef123456") {
+	if strings.Contains(r.Body.String(), cfg["bot_token"].(string)) {
 		t.Fatalf("接口回显泄露了凭据: %s", r.Body)
 	}
 	var listed struct {
@@ -280,7 +279,7 @@ func TestNotifyChannelAPIMasksSecretsAndPreservesOnUpdate(t *testing.T) {
 	if mine == nil {
 		t.Fatal("新建的渠道未出现在列表里")
 	}
-	if !notify.IsMasked(fmt.Sprint(mine.Config["webhook"])) || !notify.IsMasked(fmt.Sprint(mine.Config["secret"])) {
+	if !notify.IsMasked(fmt.Sprint(mine.Config["bot_token"])) {
 		t.Fatalf("凭据字段应为掩码值: %v", mine.Config)
 	}
 	if len(mine.SecretKeys) == 0 {
@@ -290,29 +289,30 @@ func TestNotifyChannelAPIMasksSecretsAndPreservesOnUpdate(t *testing.T) {
 	// A rename with a masked credential must keep the stored credential unchanged.
 	body, _ := json.Marshal(map[string]any{
 		"name":   "改名后",
-		"config": map[string]any{"webhook": fmt.Sprint(mine.Config["webhook"]), "secret": fmt.Sprint(mine.Config["secret"])},
+		"config": map[string]any{"bot_token": mine.Config["bot_token"]},
 	})
 	if r := f.request("PATCH", fmt.Sprintf("/api/notify/channels/%d", chID), string(body)); r.Code != 200 {
 		t.Fatalf("更新失败 %d: %s", r.Code, r.Body)
 	}
-	cfg := f.channelConfig(t, chID)
-	if cfg["webhook"] != "https://oapi.dingtalk.com/robot/send?access_token=abc123456" {
-		t.Fatalf("掩码回传把真凭据覆盖了: %v", cfg["webhook"])
-	}
-	if cfg["secret"] != "SECabcdef123456" {
-		t.Fatalf("掩码回传把 secret 覆盖了: %v", cfg["secret"])
+	if f.channelConfig(t, chID)["bot_token"] != cfg["bot_token"] {
+		t.Fatal("Masked update did not preserve the original token")
 	}
 	if f.channel(t, chID).Name != "改名后" {
 		t.Fatal("名字未更新")
 	}
 
-	// Explicitly clearing a credential differs from submitting its existing mask.
-	body, _ = json.Marshal(map[string]any{"config": map[string]any{"secret": ""}})
-	if r := f.request("PATCH", fmt.Sprintf("/api/notify/channels/%d", chID), string(body)); r.Code != 200 {
-		t.Fatalf("清空 secret 失败 %d: %s", r.Code, r.Body)
+	// Reject a destination change that would silently reuse the saved credential.
+	body, _ = json.Marshal(map[string]any{"config": map[string]any{"base_url": "https://different.example.com", "bot_token": mine.Config["bot_token"]}})
+	if r := f.request("PATCH", fmt.Sprintf("/api/notify/channels/%d", chID), string(body)); r.Code != 400 {
+		t.Fatalf("Destination change with a masked token returned %d, expected 400", r.Code)
 	}
-	if _, still := f.channelConfig(t, chID)["secret"]; still {
-		t.Fatal("空串应清空 secret")
+	// The token is required even when explicitly cleared.
+	body, _ = json.Marshal(map[string]any{"config": map[string]any{"bot_token": ""}})
+	if r := f.request("PATCH", fmt.Sprintf("/api/notify/channels/%d", chID), string(body)); r.Code != 400 {
+		t.Fatalf("Clearing a required bot token returned %d, expected 400", r.Code)
+	}
+	if after := f.channelConfig(t, chID); after["bot_token"] != cfg["bot_token"] || after["base_url"] != cfg["base_url"] {
+		t.Fatal("Rejected update changed Telegram configuration")
 	}
 }
 
@@ -333,10 +333,10 @@ func TestNotifyChannelAPICreateValidation(t *testing.T) {
 		wantSub string
 	}{
 		{"类型非法", map[string]any{"name": "x", "kind": "nope", "config": map[string]any{}}, "渠道类型无效"},
-		{"缺名称", map[string]any{"kind": notify.KindDingTalk, "config": map[string]any{"webhook": "https://e.com/h"}}, "缺少渠道名称"},
-		{"缺 webhook", map[string]any{"name": "x", "kind": notify.KindDingTalk, "config": map[string]any{}}, "Webhook"},
-		{"webhook 协议非法", map[string]any{"name": "x", "kind": notify.KindDingTalk, "config": map[string]any{"webhook": "file:///etc/passwd"}}, "Webhook 地址无效"},
-		{"模式非法", map[string]any{"name": "x", "kind": notify.KindDingTalk, "mode": "sometimes", "config": map[string]any{"webhook": "https://e.com/h"}}, "推送模式无效"},
+		{"缺名称", map[string]any{"kind": notify.KindTelegram, "config": telegramTestConfig("https://telegram.example.com")}, "缺少渠道名称"},
+		{"缺 Token", map[string]any{"name": "x", "kind": notify.KindTelegram, "config": map[string]any{}}, "Bot Token"},
+		{"API 协议非法", map[string]any{"name": "x", "kind": notify.KindTelegram, "config": telegramTestConfig("file:///invalid")}, "API 地址无效"},
+		{"模式非法", map[string]any{"name": "x", "kind": notify.KindTelegram, "mode": "sometimes", "config": telegramTestConfig("https://telegram.example.com")}, "推送模式无效"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -355,13 +355,78 @@ func TestNotifyChannelAPICreateValidation(t *testing.T) {
 	}
 }
 
+func TestNotifyLegacyChannelsStayStoredAndInert(t *testing.T) {
+	f := newNotifyFixture(t)
+	ctx := context.Background()
+	before, err := f.pg.NotificationStatsSnapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var channelID int64
+	if err := f.pg.QueryRow(`INSERT INTO notification_channels(name, kind, config)
+VALUES ('legacy destination', 'webhook', '{"url":"https://legacy.example.com"}') RETURNING id`).Scan(&channelID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { f.pg.Exec(`DELETE FROM notification_channels WHERE id=$1`, channelID) })
+	findingID := f.record(t, "legacy finding", "high")
+	var deliveryID int64
+	if err := f.pg.QueryRow(`INSERT INTO notification_deliveries(event_id, channel_id, last_error)
+SELECT id, $2, 'legacy delivery details' FROM notification_events WHERE finding_id=$1
+RETURNING id`, findingID, channelID).Scan(&deliveryID); err != nil {
+		t.Fatal(err)
+	}
+	if rows, err := f.pg.ClaimRealtimeDeliveries(ctx, channelID, 1, time.Minute); err != nil || len(rows) != 0 {
+		t.Fatalf("Legacy realtime claim returned %d rows (%v)", len(rows), err)
+	}
+	if due, err := f.pg.DigestBatchDue(ctx, channelID, 0); err != nil || due {
+		t.Fatalf("Legacy digest readiness returned %v (%v)", due, err)
+	}
+	if rows, err := f.pg.ClaimDigestBatch(ctx, channelID, 1, time.Minute); err != nil || len(rows) != 0 {
+		t.Fatalf("Legacy digest claim returned %d rows (%v)", len(rows), err)
+	}
+	if _, err := f.pg.Exec(`UPDATE notification_deliveries SET state='failed' WHERE id=$1`, deliveryID); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := f.pg.FanOutPendingEvents(ctx, 500); err != nil {
+		t.Fatal(err)
+	}
+	after, err := f.pg.NotificationStatsSnapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Channels != before.Channels || after.ChannelsOn != before.ChannelsOn || after.Failed != before.Failed {
+		t.Fatal("Legacy rows changed Telegram notification counts")
+	}
+	channelPath := fmt.Sprintf("/api/notify/channels/%d", channelID)
+	for _, tc := range []struct {
+		method, path, body string
+		status             int
+	}{
+		{"GET", "/api/notify/channels", "", http.StatusOK},
+		{"GET", fmt.Sprintf("/api/notify/deliveries?channel_id=%d", channelID), "", http.StatusOK},
+		{"PATCH", channelPath, `{"kind":"telegram"}`, http.StatusNotFound},
+		{"DELETE", channelPath, "", http.StatusNotFound},
+		{"POST", channelPath + "/test", "", http.StatusNotFound},
+		{"POST", fmt.Sprintf("/api/notify/deliveries/%d/retry", deliveryID), "", http.StatusBadRequest},
+	} {
+		res := f.request(tc.method, tc.path, tc.body)
+		if res.Code != tc.status || strings.Contains(res.Body.String(), "legacy") {
+			t.Fatalf("%s %s returned status %d with unexpected legacy data", tc.method, tc.path, res.Code)
+		}
+	}
+	var count int
+	if err := f.pg.QueryRow(`SELECT count(*) FROM notification_deliveries WHERE channel_id=$1 AND state='failed'`, channelID).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("Expected one preserved legacy delivery, got %d (%v)", count, err)
+	}
+}
+
 func TestNotifyFilterBlocksBelowThreshold(t *testing.T) {
 	f := newNotifyFixture(t)
-	hook := newFakeWebhook(t)
+	hook := newFakeTelegram(t)
 	chID := f.createChannel(t, map[string]any{
 		"name":   "仅严重",
-		"kind":   notify.KindDingTalk,
-		"config": map[string]any{"webhook": hook.URL},
+		"kind":   notify.KindTelegram,
+		"config": telegramTestConfig(hook.URL),
 		"filter": map[string]any{"min_severity": "critical"},
 	})
 	f.record(t, "低危问题", "low")
@@ -383,12 +448,12 @@ func TestNotifyFilterBlocksBelowThreshold(t *testing.T) {
 
 func TestNotifyDigestBatchesMultipleFindingsIntoOneMessage(t *testing.T) {
 	f := newNotifyFixture(t)
-	hook := newFakeWebhook(t)
+	hook := newFakeTelegram(t)
 	chID := f.createChannel(t, map[string]any{
 		"name":   "汇总推送",
-		"kind":   notify.KindDingTalk,
+		"kind":   notify.KindTelegram,
 		"mode":   db.NotifyModeDigest,
-		"config": map[string]any{"webhook": hook.URL},
+		"config": telegramTestConfig(hook.URL),
 	})
 	for i := 0; i < 3; i++ {
 		f.record(t, fmt.Sprintf("汇总漏洞%d", i+1), "high")
@@ -411,8 +476,8 @@ func TestNotifyDigestBatchesMultipleFindingsIntoOneMessage(t *testing.T) {
 	if got := hook.count(); got != 1 {
 		t.Fatalf("三条应汇总成一条消息，实际发了 %d 条", got)
 	}
-	text := markdownText(t, hook.last(t))
-	if !strings.Contains(text, "近") || !strings.Contains(text, "3 个漏洞") {
+	text := telegramText(t, hook.last(t))
+	if !strings.Contains(text, "近") || !strings.Contains(text, "3 条") {
 		t.Fatalf("汇总消息缺少条数/时间窗文案:\n%s", text)
 	}
 	for i := 1; i <= 3; i++ {
@@ -432,12 +497,12 @@ func TestNotifyDigestBatchesMultipleFindingsIntoOneMessage(t *testing.T) {
 
 func TestNotifyDisabledChannelDoesNotSend(t *testing.T) {
 	f := newNotifyFixture(t)
-	hook := newFakeWebhook(t)
+	hook := newFakeTelegram(t)
 	chID := f.createChannel(t, map[string]any{
 		"name":    "停用渠道",
-		"kind":    notify.KindDingTalk,
+		"kind":    notify.KindTelegram,
 		"enabled": false,
-		"config":  map[string]any{"webhook": hook.URL},
+		"config":  telegramTestConfig(hook.URL),
 	})
 	f.record(t, "停用期间的漏洞", "critical")
 	if _, _, err := f.pg.FanOutPendingEvents(context.Background(), 500); err != nil {
@@ -454,11 +519,11 @@ func TestNotifyDisabledChannelDoesNotSend(t *testing.T) {
 
 func TestNotifyStatusChangeDelivery(t *testing.T) {
 	f := newNotifyFixture(t)
-	hook := newFakeWebhook(t)
+	hook := newFakeTelegram(t)
 	chID := f.createChannel(t, map[string]any{
 		"name":   "状态变更订阅",
-		"kind":   notify.KindDingTalk,
-		"config": map[string]any{"webhook": hook.URL},
+		"kind":   notify.KindTelegram,
+		"config": telegramTestConfig(hook.URL),
 		"filter": map[string]any{"on_status_change": true},
 	})
 	finding := f.record(t, "状态变更用例", "high")
@@ -471,7 +536,7 @@ func TestNotifyStatusChangeDelivery(t *testing.T) {
 	// The status change and finding creation may arrive in either order, so inspect both.
 	found := false
 	for i := 0; i < hook.count(); i++ {
-		text := markdownText(t, hook.body(t, i))
+		text := telegramText(t, hook.body(t, i))
 		if strings.Contains(text, "状态变更") && strings.Contains(text, "已修复") {
 			found = true
 		}
@@ -483,11 +548,11 @@ func TestNotifyStatusChangeDelivery(t *testing.T) {
 
 func TestNotifyStatusChangeSuppressedByDefault(t *testing.T) {
 	f := newNotifyFixture(t)
-	hook := newFakeWebhook(t)
+	hook := newFakeTelegram(t)
 	chID := f.createChannel(t, map[string]any{
 		"name":   "不订阅状态变更",
-		"kind":   notify.KindDingTalk,
-		"config": map[string]any{"webhook": hook.URL},
+		"kind":   notify.KindTelegram,
+		"config": telegramTestConfig(hook.URL),
 	})
 	finding := f.record(t, "不订阅变更", "high")
 	if r := f.request("PATCH", fmt.Sprintf("/api/exploration/findings/%d", finding), `{"status":"false_positive"}`); r.Code != 200 {
@@ -509,11 +574,11 @@ WHERE d.channel_id=$1 AND e.kind=$2`, chID, notify.EventFindingStatusChanged).Sc
 
 func TestNotifyTestMessageEndpoint(t *testing.T) {
 	f := newNotifyFixture(t)
-	hook := newFakeWebhook(t)
+	hook := newFakeTelegram(t)
 	chID := f.createChannel(t, map[string]any{
 		"name":   "测试发送",
-		"kind":   notify.KindDingTalk,
-		"config": map[string]any{"webhook": hook.URL},
+		"kind":   notify.KindTelegram,
+		"config": telegramTestConfig(hook.URL),
 	})
 	if r := f.request("POST", fmt.Sprintf("/api/notify/channels/%d/test", chID), ""); r.Code != 200 {
 		t.Fatalf("测试发送失败 %d: %s", r.Code, r.Body)
@@ -522,14 +587,14 @@ func TestNotifyTestMessageEndpoint(t *testing.T) {
 		t.Fatalf("假接收端应收到 1 条测试消息，得到 %d", hook.count())
 	}
 	// The received message should be clearly marked as a test.
-	if text := markdownText(t, hook.last(t)); !strings.Contains(text, "测试") {
+	if text := telegramText(t, hook.last(t)); !strings.Contains(text, "测试") {
 		t.Fatalf("测试消息应标明是测试: %s", text)
 	}
 	// Report the channel error when configuration fails.
 	badID := f.createChannel(t, map[string]any{
 		"name":   "坏地址",
-		"kind":   notify.KindDingTalk,
-		"config": map[string]any{"webhook": "http://127.0.0.1:1/hook"},
+		"kind":   notify.KindTelegram,
+		"config": telegramTestConfig("http://127.0.0.1:1"),
 	})
 	if r := f.request("POST", fmt.Sprintf("/api/notify/channels/%d/test", badID), ""); r.Code != 502 {
 		t.Fatalf("投递失败应回 502，得到 %d: %s", r.Code, r.Body)
@@ -541,8 +606,8 @@ func TestNotifyDeliveriesHistoryAndRetry(t *testing.T) {
 	// Use a local destination where delivery will fail.
 	chID := f.createChannel(t, map[string]any{
 		"name":   "失败重试",
-		"kind":   notify.KindDingTalk,
-		"config": map[string]any{"webhook": "http://127.0.0.1:1/hook"},
+		"kind":   notify.KindTelegram,
+		"config": telegramTestConfig("http://127.0.0.1:1"),
 	})
 	f.record(t, "会失败的推送", "high")
 	ctx := context.Background()
@@ -623,13 +688,8 @@ func TestNotifyMetaAndSettingsRoundTrip(t *testing.T) {
 	if err := json.Unmarshal(r.Body.Bytes(), &meta); err != nil {
 		t.Fatal(err)
 	}
-	if len(meta.Kinds) != len(notify.Kinds()) {
-		t.Fatalf("meta 应列出全部 %d 个渠道，得到 %d", len(notify.Kinds()), len(meta.Kinds))
-	}
-	for _, k := range meta.Kinds {
-		if len(k.SecretKeys) == 0 {
-			t.Errorf("渠道 %s 未上报凭据字段", k.Kind)
-		}
+	if len(meta.Kinds) != 1 || meta.Kinds[0].Kind != notify.KindTelegram || len(meta.Kinds[0].SecretKeys) != 1 || meta.Kinds[0].SecretKeys[0] != "bot_token" {
+		t.Fatalf("Expected Telegram metadata only, got %+v", meta.Kinds)
 	}
 
 	// Round-trip the global settings and normalize the trailing slash on the link base.
@@ -659,48 +719,38 @@ func TestNotifyMetaAndSettingsRoundTrip(t *testing.T) {
 	}
 }
 
-// TestNotifyDeepLinkUsesPublicBaseURL checks that a single notification uses an ActionCard button
-// pointing to the finding detail page when public_base_url is set.
+// TestNotifyDeepLinkUsesPublicBaseURL checks the Telegram finding detail link.
 func TestNotifyDeepLinkUsesPublicBaseURL(t *testing.T) {
 	f := newNotifyFixture(t)
-	hook := newFakeWebhook(t)
+	hook := newFakeTelegram(t)
 	chID := f.createChannel(t, map[string]any{
 		"name":   "回链",
-		"kind":   notify.KindDingTalk,
-		"config": map[string]any{"webhook": hook.URL},
+		"kind":   notify.KindTelegram,
+		"config": telegramTestConfig(hook.URL),
 	})
 	finding := f.record(t, "带回链的漏洞", "high")
 	f.deliver(t, chID, "https://artex.example.com")
 
-	body := hook.last(t)
-	card, _ := body["actionCard"].(map[string]any)
-	if card == nil {
-		t.Fatalf("有回链时应用 ActionCard，得到 msgtype=%v", body["msgtype"])
-	}
-	want := fmt.Sprintf("https://artex.example.com/function/findings/detail?id=%d", finding)
-	if card["singleURL"] != want {
-		t.Fatalf("回链不对\n期望 %s\n得到 %v", want, card["singleURL"])
+	text := telegramText(t, hook.last(t))
+	want := fmt.Sprintf(`href="https://artex.example.com/function/findings/detail?id=%d"`, finding)
+	if !strings.Contains(text, want) {
+		t.Fatalf("Expected finding link %s in %s", want, text)
 	}
 }
 
-// TestNotifyNoDeepLinkWithoutBaseURL verifies the Markdown fallback avoids localhost or relative
-// links.
+// TestNotifyNoDeepLinkWithoutBaseURL verifies that missing link configuration omits the link.
 func TestNotifyNoDeepLinkWithoutBaseURL(t *testing.T) {
 	f := newNotifyFixture(t)
-	hook := newFakeWebhook(t)
+	hook := newFakeTelegram(t)
 	chID := f.createChannel(t, map[string]any{
 		"name":   "无回链",
-		"kind":   notify.KindDingTalk,
-		"config": map[string]any{"webhook": hook.URL},
+		"kind":   notify.KindTelegram,
+		"config": telegramTestConfig(hook.URL),
 	})
 	f.record(t, "无回链的漏洞", "high")
 	f.deliver(t, chID, "")
 
-	body := hook.last(t)
-	if body["msgtype"] != "markdown" {
-		t.Fatalf("未配外部地址时应发 markdown，得到 %v", body["msgtype"])
-	}
-	if text := markdownText(t, body); strings.Contains(text, "查看详情") {
+	if text := telegramText(t, hook.last(t)); strings.Contains(text, "查看详情") {
 		t.Fatalf("未配外部地址时不该出现详情链接:\n%s", text)
 	}
 }
@@ -710,17 +760,16 @@ func TestNotifyNoDeepLinkWithoutBaseURL(t *testing.T) {
 // budget. Repeated polls must eventually deliver every item.
 func TestNotifyDigestSegmentsAndDefersRemainder(t *testing.T) {
 	f := newNotifyFixture(t)
-	hook := newFakeWebhook(t)
-	// Use WeCom because its Markdown limit is 4096 bytes.
+	hook := newFakeTelegram(t)
 	chID := f.createChannel(t, map[string]any{
 		"name":   "分段汇总",
-		"kind":   notify.KindWeCom,
+		"kind":   notify.KindTelegram,
 		"mode":   db.NotifyModeDigest,
-		"config": map[string]any{"webhook": hook.URL},
+		"config": telegramTestConfig(hook.URL),
 	})
-	const total = 60
+	const total = 100
 	// Use long titles so the findings exceed the channel limit.
-	longName := strings.Repeat("超长漏洞名称", 6)
+	longName := strings.Repeat("超长漏洞名称", 18)
 	for i := 0; i < total; i++ {
 		f.record(t, longName+strconv.Itoa(i+1), "high")
 	}
@@ -748,13 +797,13 @@ func TestNotifyDigestSegmentsAndDefersRemainder(t *testing.T) {
 		t.Fatal("应有条目被标记为已送达")
 	}
 	if pending == 0 {
-		t.Fatalf("一批 %d 条不可能全装进 4096 字节，应有剩余待发；sent=%d", total, sent)
+		t.Fatalf("一批 %d 条不可能全装进 4096 字符，应有剩余待发；sent=%d", total, sent)
 	}
 	if sent+pending != total {
 		t.Fatalf("条目数对不上：sent=%d pending=%d total=%d（既没送达也没待发=丢失）", sent, pending, total)
 	}
 	// The message should report the number of deferred items.
-	if text := markdownText(t, hook.last(t)); !strings.Contains(text, "其余") {
+	if text := telegramText(t, hook.last(t)); !strings.Contains(text, "其余") {
 		t.Fatalf("消息应说明还有条目未包含在本条:\n%.400s", text)
 	}
 
@@ -791,7 +840,7 @@ WHERE channel_id=$1 AND state <> $2 AND state <> $3`, chID, db.NotifyStateSent, 
 		}
 	}
 	if rounds < 2 {
-		t.Fatalf("一条 4096 字节的消息装不下 %d 条长标题漏洞，应分多轮发出，实际只用了 %d 轮", total, rounds)
+		t.Fatalf("一条 4096 字符的消息装不下 %d 条长标题漏洞，应分多轮发出，实际只用了 %d 轮", total, rounds)
 	}
 	// Later sends should contain only deferred items without rejections.
 	var failed int

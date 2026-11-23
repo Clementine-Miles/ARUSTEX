@@ -1,7 +1,6 @@
 package notify
 
 import (
-	"context"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -9,13 +8,11 @@ import (
 	"testing"
 )
 
-// These tests cover delivery error handling at the shared HTTP layer.
-//
-// The shared HTTP client classifies transport responses. Individual adapters
-// separately classify their platform's response fields.
+// These tests cover Telegram transport error classification.
 
 func replyServer(t *testing.T, status int, body string) *httptest.Server {
 	t.Helper()
+	t.Setenv(AllowLocalTargetsEnv, "1")
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(status)
@@ -25,7 +22,7 @@ func replyServer(t *testing.T, status int, body string) *httptest.Server {
 	return srv
 }
 
-func TestDoJSONClassifiesHTTPStatus(t *testing.T) {
+func TestTelegramHTTPClassifiesHTTPStatus(t *testing.T) {
 	cases := []struct {
 		name      string
 		status    int
@@ -45,7 +42,7 @@ func TestDoJSONClassifiesHTTPStatus(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			srv := replyServer(t, tc.status, `{"detail":"upstream says no"}`)
-			_, err := doJSON(context.Background(), "GET", srv.URL, nil, nil)
+			_, err := postTelegramJSON(t.Context(), srv.URL, "", map[string]any{})
 			if tc.status < 300 {
 				if err != nil {
 					t.Fatalf("2xx 不应报错: %v", err)
@@ -67,24 +64,24 @@ func TestDoJSONClassifiesHTTPStatus(t *testing.T) {
 	}
 }
 
-// TestDoJSONIncludesResponseSnippet checks that peer errors remain diagnosable.
-func TestDoJSONIncludesResponseSnippet(t *testing.T) {
-	srv := replyServer(t, 400, `{"error":"invalid webhook token"}`)
-	_, err := doJSON(context.Background(), "GET", srv.URL, nil, nil)
+// TestTelegramHTTPIncludesResponseSnippet checks that peer errors remain diagnosable.
+func TestTelegramHTTPIncludesResponseSnippet(t *testing.T) {
+	srv := replyServer(t, 400, `{"error":"invalid response payload"}`)
+	_, err := postTelegramJSON(t.Context(), srv.URL, "", map[string]any{})
 	if err == nil {
 		t.Fatal("应报错")
 	}
-	if !strings.Contains(err.Error(), "invalid webhook token") {
+	if !strings.Contains(err.Error(), "invalid response payload") {
 		t.Errorf("错误信息应带回对端的说明，得到 %v", err)
 	}
 }
 
-// TestDoJSONSnippetIsSingleLineAndBounded guards the shape of delivery history errors.
-func TestDoJSONSnippetIsSingleLineAndBounded(t *testing.T) {
+// TestTelegramHTTPSnippetIsSingleLineAndBounded guards the shape of delivery history errors.
+func TestTelegramHTTPSnippetIsSingleLineAndBounded(t *testing.T) {
 	// Return an overlong response containing line breaks and tabs.
 	long := strings.Repeat("x", 5000)
 	srv := replyServer(t, 500, "line1\nline2\r\n\tline3 "+long)
-	_, err := doJSON(context.Background(), "GET", srv.URL, nil, nil)
+	_, err := postTelegramJSON(t.Context(), srv.URL, "", map[string]any{})
 	if err == nil {
 		t.Fatal("应报错")
 	}
@@ -98,11 +95,11 @@ func TestDoJSONSnippetIsSingleLineAndBounded(t *testing.T) {
 	}
 }
 
-// TestDoJSONRejectsOversizedResponse verifies that delivery reads are bounded.
-func TestDoJSONRejectsOversizedResponse(t *testing.T) {
+// TestTelegramHTTPRejectsOversizedResponse verifies that delivery reads are bounded.
+func TestTelegramHTTPRejectsOversizedResponse(t *testing.T) {
 	huge := strings.Repeat("A", 1<<20) // 1 MiB
 	srv := replyServer(t, 400, huge)
-	_, err := doJSON(context.Background(), "GET", srv.URL, nil, nil)
+	_, err := postTelegramJSON(t.Context(), srv.URL, "", map[string]any{})
 	if err == nil {
 		t.Fatal("应报错")
 	}

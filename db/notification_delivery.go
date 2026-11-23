@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/Autumn-27/artex/notify"
 )
 
 // Notification delivery claims and state transitions.
@@ -24,12 +26,9 @@ const MaxNotifyAttempts = 3
 //
 // Bound memory use and rendered message size during large backlogs. Unclaimed records remain
 // eligible for later batches.
-//
-// The limit keeps work near a useful scale for small messages such as WeCom's 4096-byte limit.
 const MaxDigestBatchSize = 500
 
-// NotificationDelivery joins the queued message, event snapshot, and channel configuration used
-// to render it.
+// NotificationDelivery joins a queued message with its event and destination name.
 type NotificationDelivery struct {
 	ID            int64           `json:"id"`
 	EventID       int64           `json:"event_id"`
@@ -42,43 +41,36 @@ type NotificationDelivery struct {
 	CreatedAt     time.Time       `json:"created_at"`
 	SentAt        *time.Time      `json:"sent_at,omitempty"`
 	Snapshot      json.RawMessage `json:"snapshot,omitempty"`
-	// Joined rendering context. The server assembles the API representation.
-	Channel *NotificationChannel `json:"-"`
 	// FindingID and EventKind let history link directly to the finding.
 	FindingID int64  `json:"finding_id,string"`
 	EventKind string `json:"event_kind"`
-	// ChannelName and ChannelKind supply list labels without an extra query.
+	// ChannelName supplies the history label without returning destination credentials.
 	ChannelName string `json:"channel_name"`
-	ChannelKind string `json:"channel_kind"`
 }
 
 const notificationDeliveryCols = `d.id, d.event_id, d.channel_id, d.state, d.attempts, d.next_attempt_at,
        d.last_error, d.batch_id, d.created_at, d.sent_at`
 
-// joinedDeliveryQuery reads the delivery, event snapshot, and channel configuration together to
-// avoid extra round trips.
-const joinedDeliveryQuery = `SELECT ` + notificationDeliveryCols + `,
-       e.snapshot, e.kind, e.finding_id,
-       c.id, c.name, c.kind, c.enabled, c.config, c.mode, c.filter, c.rate_per_min
-FROM notification_deliveries d
+const telegramChannelPredicate = `c.kind = '` + notify.KindTelegram + `'`
+
+const telegramDeliveryRelations = `FROM notification_deliveries d
 JOIN notification_events e ON e.id = d.event_id
-JOIN notification_channels c ON c.id = d.channel_id`
+JOIN notification_channels c ON c.id = d.channel_id AND ` + telegramChannelPredicate
+
+const joinedDeliveryQuery = `SELECT ` + notificationDeliveryCols + `,
+       e.snapshot, e.kind, e.finding_id, c.name ` + telegramDeliveryRelations
 
 func scanNotificationDelivery(sc interface{ Scan(...any) error }) (*NotificationDelivery, error) {
 	var (
-		dl        NotificationDelivery
-		lastErr   sql.NullString
-		batchID   sql.NullInt64
-		sentAt    sql.NullTime
-		snapshot  []byte
-		eventKind string
-		channel   NotificationChannel
-		chEnabled bool
+		dl       NotificationDelivery
+		lastErr  sql.NullString
+		batchID  sql.NullInt64
+		sentAt   sql.NullTime
+		snapshot []byte
 	)
 	if err := sc.Scan(&dl.ID, &dl.EventID, &dl.ChannelID, &dl.State, &dl.Attempts, &dl.NextAttemptAt,
 		&lastErr, &batchID, &dl.CreatedAt, &sentAt,
-		&snapshot, &eventKind, &dl.FindingID,
-		&channel.ID, &channel.Name, &channel.Kind, &chEnabled, &channel.Config, &channel.Mode, &channel.Filter, &channel.RatePerMin); err != nil {
+		&snapshot, &dl.EventKind, &dl.FindingID, &dl.ChannelName); err != nil {
 		return nil, err
 	}
 	dl.LastError = lastErr.String
@@ -89,11 +81,6 @@ func scanNotificationDelivery(sc interface{ Scan(...any) error }) (*Notification
 		dl.SentAt = &sentAt.Time
 	}
 	dl.Snapshot = json.RawMessage(snapshot)
-	dl.EventKind = eventKind
-	dl.ChannelName = channel.Name
-	dl.ChannelKind = channel.Kind
-	channel.Enabled = &chEnabled
-	dl.Channel = &channel
 	return &dl, nil
 }
 
@@ -119,7 +106,7 @@ func (d *DB) ClaimRealtimeDeliveries(ctx context.Context, channelID int64, limit
 		sql: `SELECT dd.id FROM notification_deliveries dd
 JOIN notification_channels c ON c.id = dd.channel_id
 WHERE dd.channel_id = $1 AND dd.state IN ($2,$3) AND dd.next_attempt_at <= now()
-  AND c.enabled AND c.mode = $4
+  AND c.enabled AND c.mode = $4 AND ` + telegramChannelPredicate + `
 ORDER BY dd.next_attempt_at, dd.id
 FOR UPDATE OF dd SKIP LOCKED
 LIMIT $5`,
@@ -140,7 +127,7 @@ func (d *DB) DigestBatchDue(ctx context.Context, channelID int64, minAge time.Du
 	err := d.QueryRowContext(ctx, `SELECT EXISTS (
   SELECT 1 FROM notification_deliveries d
   JOIN notification_channels c ON c.id = d.channel_id
-  WHERE d.channel_id = $1 AND d.state IN ($2,$3) AND c.enabled
+  WHERE d.channel_id = $1 AND d.state IN ($2,$3) AND c.enabled AND `+telegramChannelPredicate+`
   GROUP BY d.channel_id
   HAVING min(d.created_at) <= now() - make_interval(secs => $4)
 )`, channelID, NotifyStatePending, NotifyStateSending, int64(minAge.Seconds())).Scan(&due)
@@ -168,7 +155,7 @@ func (d *DB) ClaimDigestBatch(ctx context.Context, channelID int64, limit int, l
 	out, err := d.claimDeliveries(ctx, lease, claimQuery{
 		sql: `SELECT dd.id FROM notification_deliveries dd
 JOIN notification_channels c ON c.id = dd.channel_id
-WHERE dd.channel_id = $1 AND dd.state IN ($2,$3) AND dd.next_attempt_at <= now() AND c.enabled
+WHERE dd.channel_id = $1 AND dd.state IN ($2,$3) AND dd.next_attempt_at <= now() AND c.enabled AND ` + telegramChannelPredicate + `
 ORDER BY dd.id
 FOR UPDATE OF dd SKIP LOCKED
 LIMIT $4`,
@@ -321,7 +308,9 @@ func (d *DB) FailDeliveries(ctx context.Context, ids []int64, errMsg string) err
 func (d *DB) RetryNotificationDelivery(ctx context.Context, id int64) error {
 	res, err := d.ExecContext(ctx, `UPDATE notification_deliveries
 SET state=$2, attempts=0, next_attempt_at=now(), last_error=''
-WHERE id=$1 AND state IN ($3,$4)`, id, NotifyStatePending, NotifyStateFailed, NotifyStateSkipped)
+WHERE id=$1 AND state IN ($3,$4) AND EXISTS (
+    SELECT 1 FROM notification_channels c WHERE c.id=notification_deliveries.channel_id AND `+telegramChannelPredicate+`
+)`, id, NotifyStatePending, NotifyStateFailed, NotifyStateSkipped)
 	if err != nil {
 		return err
 	}
@@ -370,8 +359,7 @@ func (d *DB) ListNotificationDeliveries(ctx context.Context, f NotificationDeliv
 	where, args := f.where()
 
 	var total int
-	if err := d.QueryRowContext(ctx, `SELECT count(*) FROM notification_deliveries d
-JOIN notification_events e ON e.id = d.event_id`+where, args...).Scan(&total); err != nil {
+	if err := d.QueryRowContext(ctx, `SELECT count(*) `+telegramDeliveryRelations+where, args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
 

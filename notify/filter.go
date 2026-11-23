@@ -106,3 +106,22 @@ func containsAnyFold(s string, keywords []string) bool {
 	}
 	return false
 }
+
+// severityRank orders finding severities. An unknown severity ranks below known values and is filtered when a minimum is set.
+var severityRank = map[string]int{
+	"low":      1,
+	"medium":   2,
+	"high":     3,
+	"critical": 4,
+}
+
+// SeverityRank returns the severity rank, or zero when unknown.
+func SeverityRank(severity string) int { return severityRank[severity] }
+
+// AtLeast compares severity with min. An empty minimum accepts any severity, and a nonempty minimum rejects unknown severities.
+func AtLeast(severity, min string) bool {
+	if min == "" {
+		return true
+	}
+	return SeverityRank(severity) >= SeverityRank(min)
+}

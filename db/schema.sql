@@ -1275,22 +1275,15 @@ CREATE TRIGGER trg_task_intercept_rules_upd BEFORE UPDATE ON task_intercept_rule
 -- rows hold dispatch status, retries, and batch membership.
 -- =====================================================================
 
--- Multiple channels can share a kind. The server validates kinds so adding a channel type does
--- not require a constraint migration.
+-- Multiple Telegram destinations can have independent credentials, filters, and delivery limits.
 CREATE TABLE IF NOT EXISTS notification_channels (
     id           BIGSERIAL PRIMARY KEY,
     name         TEXT NOT NULL,
-    -- Supported kinds: DingTalk, Feishu, WeCom, generic webhook, Telegram, and email.
+    -- Keep the kind discriminator so retired channel rows remain stored and inactive.
     kind         TEXT NOT NULL,
     enabled      BOOLEAN NOT NULL DEFAULT true,
-    -- Store per-channel configuration and plaintext credentials as JSONB. Validate by kind in Go and
-    -- mask secrets in API responses.
-    --   dingtalk {webhook,secret}
-    --   feishu   {webhook,secret}
-    --   wecom    {webhook}
-    --   webhook  {url,method,content_type,headers{},body_template}
-    --   telegram {bot_token,chat_id,base_url}
-    --   email    {host,port,username,password,from,to[],tls}
+    -- Store Telegram settings as JSONB: bot_token, chat_id, and optional base_url. Mask the token
+    -- in API responses.
     config       JSONB NOT NULL DEFAULT '{}',
     -- Realtime sends matching events immediately. Digest groups them on the configured interval.
     mode         TEXT NOT NULL DEFAULT 'realtime',
@@ -1299,8 +1292,7 @@ CREATE TABLE IF NOT EXISTS notification_channels (
     -- Nonempty task and asset filters require overlap. Class include and exclude filters use
     -- case-insensitive substrings. on_status_change applies only to realtime.
     filter       JSONB NOT NULL DEFAULT '{}',
-    -- Zero means no per-minute limit. The default reflects DingTalk and WeCom limits. Rate-limited
-    -- delivery waits for a later tick.
+    -- Zero means no per-minute limit. Rate-limited delivery waits for a later tick.
     rate_per_min INTEGER NOT NULL DEFAULT 20,
     created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()

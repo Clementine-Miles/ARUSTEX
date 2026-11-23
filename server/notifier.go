@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -60,7 +61,6 @@ var notifyBackoff = []time.Duration{
 // Notifier runs independently from Scheduler. Notifications need a three-second polling interval,
 // and a delivery failure must not block Agent triggers.
 type Notifier struct {
-	s  *Server
 	pg *db.DB
 
 	// mu protects the per-channel rate-limit buckets.
@@ -76,7 +76,7 @@ type notifyBucket struct {
 }
 
 func newNotifier(s *Server) *Notifier {
-	return &Notifier{s: s, pg: s.m.pg, buckets: map[int64]*notifyBucket{}}
+	return &Notifier{pg: s.m.pg, buckets: map[int64]*notifyBucket{}}
 }
 
 // Run polls until ctx ends. server.New starts it once.
@@ -98,7 +98,7 @@ func (n *Notifier) Run(ctx context.Context) {
 
 // step dispatches new events, then sends due deliveries. Log failures and let the next poll retry.
 func (n *Notifier) step(ctx context.Context) {
-	if !n.enabled() {
+	if !n.pg.GetBool(settingNotifyEnabled, true) {
 		return
 	}
 	if _, _, err := n.pg.FanOutPendingEvents(ctx, notifyFanOutPerTick); err != nil {
@@ -110,7 +110,7 @@ func (n *Notifier) step(ctx context.Context) {
 		log.Printf("[notify] 读取渠道失败: %v", err)
 		return
 	}
-	baseURL := n.publicBaseURL()
+	baseURL := trimTrailingSlash(notifyPublicBaseURL(n.pg))
 	for _, ch := range channels {
 		if !ch.IsEnabled() {
 			continue
@@ -153,11 +153,7 @@ func (n *Notifier) stepRealtime(ctx context.Context, ch *db.NotificationChannel,
 	if len(deliveries) == 0 {
 		return
 	}
-	channel, cfg, ok := n.adapt(ch)
-	if !ok {
-		_ = n.pg.FailDeliveries(ctx, deliveryIDs(deliveries), fmt.Sprintf("渠道类型 %q 未注册", ch.Kind))
-		return
-	}
+	cfg := readNotifyConfig(ch.Config)
 	for _, dl := range deliveries {
 		msg, err := n.renderSingle(ctx, dl, baseURL)
 		if err != nil {
@@ -166,13 +162,13 @@ func (n *Notifier) stepRealtime(ctx context.Context, ch *db.NotificationChannel,
 			_ = n.pg.FailDeliveries(ctx, []int64{dl.ID}, err.Error())
 			continue
 		}
-		n.send(ctx, channel, cfg, msg, []*db.NotificationDelivery{dl})
+		n.send(ctx, cfg, msg, []*db.NotificationDelivery{dl})
 	}
 }
 
 // stepDigest aggregates due deliveries for the channel into one message.
 func (n *Notifier) stepDigest(ctx context.Context, ch *db.NotificationChannel, allow int, baseURL string) {
-	window := n.digestInterval()
+	window := time.Duration(notifyDigestIntervalMin(n.pg)) * time.Minute
 	due, err := n.pg.DigestBatchDue(ctx, ch.ID, window)
 	if err != nil {
 		log.Printf("[notify] 判断汇总批次失败 channel=%d: %v", ch.ID, err)
@@ -189,11 +185,6 @@ func (n *Notifier) stepDigest(ctx context.Context, ch *db.NotificationChannel, a
 	if len(deliveries) == 0 {
 		return
 	}
-	channel, cfg, ok := n.adapt(ch)
-	if !ok {
-		_ = n.pg.FailDeliveries(ctx, deliveryIDs(deliveries), fmt.Sprintf("渠道类型 %q 未注册", ch.Kind))
-		return
-	}
 	msg, included, err := n.renderBatch(ctx, deliveries, baseURL, int(window.Minutes()))
 	if err != nil {
 		_ = n.pg.FailDeliveries(ctx, deliveryIDs(deliveries), err.Error())
@@ -204,39 +195,40 @@ func (n *Notifier) stepDigest(ctx context.Context, ch *db.NotificationChannel, a
 	if skipped := excludeDeliveries(deliveries, included); len(skipped) > 0 {
 		reason := "事件快照无法解析，本条漏洞无法渲染成消息"
 		if fErr := n.pg.FailDeliveries(ctx, deliveryIDs(skipped), reason); fErr != nil {
-			log.Printf("[notify] 标记坏快照投递失败 channel=%s ids=%v: %v", ch.Kind, deliveryIDs(skipped), fErr)
+			log.Printf("[notify] 标记坏快照投递失败 channel=%d ids=%v: %v", ch.ID, deliveryIDs(skipped), fErr)
 		}
 		log.Printf("[notify] 跳过 %d 条快照无法解析的投递 channel=%d", len(skipped), ch.ID)
 	}
 	// Pass only rendered entries to send. Their order matches msg.Items so partial acknowledgement
 	// marks the correct delivery rows.
-	n.send(ctx, channel, cfg, msg, included)
+	n.send(ctx, readNotifyConfig(ch.Config), msg, included)
 }
 
 // send applies one result to the rendered batch. If a channel fits only the first K items, it
 // acknowledges those entries and leaves the remainder queued for the next send.
-func (n *Notifier) send(ctx context.Context, channel notify.Channel, cfg map[string]any, msg notify.Message, deliveries []*db.NotificationDelivery) {
+func (n *Notifier) send(ctx context.Context, cfg map[string]any, msg notify.Message, deliveries []*db.NotificationDelivery) {
 	// Bound an individual send so a slow channel cannot block all remaining channels.
 	sendCtx, cancel := context.WithTimeout(ctx, notifySendTimeout)
 	defer cancel()
-	delivered, err := channel.Send(sendCtx, cfg, msg)
+	delivered, err := notify.Send(sendCtx, cfg, msg)
+	channelID := deliveries[0].ChannelID
 	if err == nil && delivered > 0 {
 		if delivered > len(deliveries) {
 			// Clamp impossible acknowledgement counts and log the rendering discrepancy.
-			log.Printf("[notify] 渠道回报送达条数 %d 超过投递数 %d channel=%s，按全部送达处理",
-				delivered, len(deliveries), channel.Kind())
+			log.Printf("[notify] 渠道回报送达条数 %d 超过投递数 %d channel=%d，按全部送达处理",
+				delivered, len(deliveries), channelID)
 			delivered = len(deliveries)
 		}
 		sent, rest := deliveries[:delivered], deliveries[delivered:]
 		if err := n.pg.MarkDeliveriesSent(ctx, deliveryIDs(sent)); err != nil {
-			log.Printf("[notify] 标记已送达失败 channel=%s ids=%v: %v", channel.Kind(), deliveryIDs(sent), err)
+			log.Printf("[notify] 标记已送达失败 channel=%d ids=%v: %v", channelID, deliveryIDs(sent), err)
 		}
 		if len(rest) > 0 {
 			// Requeue items that did not fit in the message. DeferDeliveries restores the attempt
 			// consumed at claim time because these entries were not sent.
 			if err := n.pg.DeferDeliveries(ctx, deliveryIDs(rest),
 				fmt.Sprintf("本条消息已达渠道长度上限，仅送达前 %d 条，其余留待下一批", delivered)); err != nil {
-				log.Printf("[notify] 分段续发排队失败 channel=%s ids=%v: %v", channel.Kind(), deliveryIDs(rest), err)
+				log.Printf("[notify] 分段续发排队失败 channel=%d ids=%v: %v", channelID, deliveryIDs(rest), err)
 			}
 		}
 		return
@@ -265,24 +257,24 @@ func (n *Notifier) send(ctx context.Context, channel notify.Channel, cfg map[str
 
 	if len(failIDs) > 0 {
 		if fErr := n.pg.FailDeliveries(ctx, failIDs, err.Error()); fErr != nil {
-			log.Printf("[notify] 标记失败状态出错 channel=%s ids=%v: %v", channel.Kind(), failIDs, fErr)
+			log.Printf("[notify] 标记失败状态出错 channel=%d ids=%v: %v", channelID, failIDs, fErr)
 		}
 	}
 	if len(exhaustedIDs) > 0 {
 		reason := fmt.Sprintf("重试 %d 次后仍失败: %s", db.MaxNotifyAttempts, err)
 		if fErr := n.pg.FailDeliveries(ctx, exhaustedIDs, reason); fErr != nil {
-			log.Printf("[notify] 标记失败状态出错 channel=%s ids=%v: %v", channel.Kind(), exhaustedIDs, fErr)
+			log.Printf("[notify] 标记失败状态出错 channel=%d ids=%v: %v", channelID, exhaustedIDs, fErr)
 		}
 	}
 	// Group retries by the few supported delays to avoid one database round trip per row.
 	for delay, group := range byDelay {
 		if rErr := n.pg.RescheduleDeliveries(ctx, group, delay, err.Error()); rErr != nil {
-			log.Printf("[notify] 重排投递失败 channel=%s ids=%v: %v", channel.Kind(), group, rErr)
+			log.Printf("[notify] 重排投递失败 channel=%d ids=%v: %v", channelID, group, rErr)
 		}
 	}
 	if len(failIDs)+len(exhaustedIDs) > 0 {
-		log.Printf("[notify] 投递失败 channel=%d kind=%s 永久失败=%d 重试耗尽=%d 待重试=%d: %s",
-			deliveries[0].ChannelID, channel.Kind(), len(failIDs), len(exhaustedIDs), len(byDelay), err)
+		log.Printf("[notify] 投递失败 channel=%d 永久失败=%d 重试耗尽=%d 待重试=%d: %s",
+			channelID, len(failIDs), len(exhaustedIDs), len(byDelay), err)
 	}
 }
 
@@ -302,23 +294,13 @@ func excludeDeliveries(all, keep []*db.NotificationDelivery) []*db.NotificationD
 	return out
 }
 
-// adapt resolves the channel implementation and parses its configuration. An unregistered channel
-// fails permanently.
-func (n *Notifier) adapt(ch *db.NotificationChannel) (notify.Channel, map[string]any, bool) {
-	channel, ok := notify.Get(ch.Kind)
-	if !ok {
-		return nil, nil, false
-	}
+// readNotifyConfig decodes a stored destination. Invalid data is treated as missing configuration.
+func readNotifyConfig(raw json.RawMessage) map[string]any {
 	var cfg map[string]any
-	if len(ch.Config) > 0 {
-		// An empty configuration lets channel validation name the missing fields if stored JSON
-		// cannot be parsed.
-		_ = json.Unmarshal(ch.Config, &cfg)
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return nil
 	}
-	if cfg == nil {
-		cfg = map[string]any{}
-	}
-	return channel, cfg, true
+	return cfg
 }
 
 // renderSingle builds a message from one finding.
@@ -408,7 +390,7 @@ func (n *Notifier) takeTokens(channelID int64, ratePerMin, want int, now time.Ti
 	}
 	// Refill by elapsed wall-clock time at ratePerMin/60 tokens per second.
 	if elapsed := now.Sub(b.lastFill).Seconds(); elapsed > 0 {
-		b.tokens = minF(float64(ratePerMin), b.tokens+elapsed*float64(ratePerMin)/60)
+		b.tokens = min(float64(ratePerMin), b.tokens+elapsed*float64(ratePerMin)/60)
 		b.lastFill = now
 	}
 	// Add a small epsilon before truncation so floating-point rounding does not strand a full
@@ -419,34 +401,6 @@ func (n *Notifier) takeTokens(channelID int64, ratePerMin, want int, now time.Ti
 	}
 	b.tokens -= float64(take)
 	return take
-}
-
-// enabled reads the global delivery switch.
-func (n *Notifier) enabled() bool {
-	return n.pg.GetBool(settingNotifyEnabled, true)
-}
-
-// publicBaseURL returns the external link base without trailing slashes.
-func (n *Notifier) publicBaseURL() string {
-	v, ok, err := n.pg.GetSetting(settingNotifyPublicBaseURL)
-	if err != nil || !ok {
-		return ""
-	}
-	return trimTrailingSlash(v)
-}
-
-// digestInterval returns the configured digest interval or the default for missing or invalid
-// values.
-func (n *Notifier) digestInterval() time.Duration {
-	v, ok, err := n.pg.GetSetting(settingNotifyDigestMinutes)
-	if err != nil || !ok {
-		return time.Duration(notifyDefaultDigestMinutes) * time.Minute
-	}
-	m := 0
-	if _, err := fmt.Sscanf(v, "%d", &m); err != nil || m <= 0 {
-		return time.Duration(notifyDefaultDigestMinutes) * time.Minute
-	}
-	return time.Duration(m) * time.Minute
 }
 
 // parseSnapshot decodes the delivery's associated event snapshot.
@@ -474,15 +428,5 @@ func deliveryIDs(deliveries []*db.NotificationDelivery) []int64 {
 }
 
 func trimTrailingSlash(s string) string {
-	for len(s) > 0 && s[len(s)-1] == '/' {
-		s = s[:len(s)-1]
-	}
-	return s
-}
-
-func minF(a, b float64) float64 {
-	if a < b {
-		return a
-	}
-	return b
+	return strings.TrimRight(s, "/")
 }

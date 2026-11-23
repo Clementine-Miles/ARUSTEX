@@ -4,127 +4,111 @@ import { CheckIcon } from "lucide-react";
 
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
-import { Textarea } from "@/components/ui/textarea";
-import type { NotificationFilter } from "@/lib/types";
+import type { NotificationFilter, TelegramChannelConfig } from "@/lib/types";
 
-// Keep presentation-specific input helpers local to the form.
-import { type FieldDef, type FieldKind, SEVERITY_OPTIONS } from "./channel-fields";
+export const SEVERITY_OPTIONS = [
+  { value: "", label: "不限" },
+  { value: "low", label: "低危及以上" },
+  { value: "medium", label: "中危及以上" },
+  { value: "high", label: "高危及以上" },
+  { value: "critical", label: "仅严重" },
+];
 
-// Convert JSON configuration values to display text. buildConfig handles serialization.
-function asText(v: unknown): string {
-  if (typeof v === "string") return v;
-  if (v === null || v === undefined) return "";
-  return String(v);
+// Parse IDs separated by commas or whitespace.
+export function parseIDs(text: string): number[] {
+  return text
+    .split(/[\s,，]+/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((s) => Number(s))
+    .filter((n) => Number.isFinite(n) && n > 0);
+}
+// Split keywords on commas or line breaks so finding types may contain spaces.
+export function parseKeywords(text: string): string[] {
+  return text
+    .split(/[\n,，]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
 }
 
-// Select the native input type for each field.
-function inputType(kind: FieldKind): "text" | "password" | "number" {
-  if (kind === "password") return "password";
-  if (kind === "number") return "number";
-  return "text";
-}
+export type ChannelForm = {
+  name: string;
+  mode: "realtime" | "digest";
+  enabled: boolean;
+  ratePerMin: string;
+  config: Required<TelegramChannelConfig>;
+  minSeverity: string;
+  includeText: string;
+  excludeText: string;
+  taskIDsText: string;
+  assetIDsText: string;
+  onStatusChange: boolean;
+};
 
-// Render controls from definitions. Indicate saved credentials without putting their masked representation in
-// an input.
-export function ConfigField({
-  def,
-  value,
-  isSecret,
+export const emptyForm = (): ChannelForm => ({
+  name: "",
+  mode: "realtime",
+  enabled: true,
+  ratePerMin: "",
+  config: { bot_token: "", chat_id: "", base_url: "" },
+  minSeverity: "",
+  includeText: "",
+  excludeText: "",
+  taskIDsText: "",
+  assetIDsText: "",
+  onStatusChange: false,
+});
+
+export function TelegramFields({
+  config,
   onChange,
 }: {
-  def: FieldDef;
-  value: unknown;
-  isSecret: boolean;
-  onChange: (v: unknown) => void;
+  config: Required<TelegramChannelConfig>;
+  onChange: (patch: TelegramChannelConfig) => void;
 }) {
-  const id = `n-cfg-${def.key}`;
-  const raw = asText(value);
-  // A masked value contains the marker and a recognizable suffix.
-  const masked = isSecret && raw.startsWith("__masked__");
-  const maskedTail = masked ? (raw.split("…")[1] ?? "") : "";
-
-  if (def.kind === "switch") {
-    return (
-      <div className="flex items-center gap-2 text-sm">
-        <Switch checked={value === true} onCheckedChange={onChange} aria-label={def.label} />
-        {def.label}
-        {def.help && <span className="text-muted-foreground">（{def.help}）</span>}
-      </div>
-    );
-  }
-
-  if (def.kind === "select") {
-    return (
-      <div className="grid gap-2">
-        <Label>{def.label}</Label>
-        <Select value={raw || def.options?.[0]?.value} onValueChange={onChange}>
-          <SelectTrigger>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {(def.options ?? []).map((o) => (
-              <SelectItem key={o.value} value={o.value}>
-                {o.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-    );
-  }
-
-  // Dispatch by control type without nested conditional expressions.
-  function control() {
-    if (def.kind === "textarea" || def.kind === "kv") {
-      return (
-        <Textarea
-          id={id}
-          className="font-mono"
-          placeholder={def.placeholder}
-          value={masked ? "" : raw}
-          onChange={(e) => onChange(e.target.value)}
-        />
-      );
-    }
-    if (def.kind === "list") {
-      return (
-        <Input
-          id={id}
-          value={Array.isArray(value) ? (value as string[]).join(", ") : raw}
-          onChange={(e) => onChange(e.target.value)}
-          placeholder={def.placeholder}
-        />
-      );
-    }
-    return (
-      <Input
-        id={id}
-        className={def.kind === "text" ? "font-mono" : ""}
-        type={inputType(def.kind)}
-        placeholder={def.placeholder}
-        value={masked ? "" : raw}
-        onChange={(e) => onChange(e.target.value)}
-      />
-    );
-  }
-
-  const hint = masked ? (
-    <p className="text-muted-foreground flex items-center gap-1 text-xs">
-      <CheckIcon className="size-3" />
-      已保存{maskedTail ? `（尾号 ${maskedTail}）` : ""} · 填入新值即覆盖，清空则删除该项
-    </p>
-  ) : (
-    def.help && <p className="text-muted-foreground text-xs">{def.help}</p>
-  );
+  const masked = config.bot_token.startsWith("__masked__");
+  const tokenTail = masked ? config.bot_token.split("…")[1] : undefined;
 
   return (
-    <div className="grid gap-2">
-      <Label htmlFor={id}>{def.label}</Label>
-      {control()}
-      {hint}
-    </div>
+    <>
+      <div className="grid gap-2">
+        <Label htmlFor="n-bot-token">Bot Token</Label>
+        <Input
+          id="n-bot-token"
+          type="password"
+          placeholder="123456:ABC-DEF..."
+          value={masked ? "" : config.bot_token}
+          onChange={(e) => onChange({ bot_token: e.target.value })}
+        />
+        {masked && (
+          <p className="flex items-center gap-1 text-muted-foreground text-xs">
+            <CheckIcon className="size-3" />
+            已保存{tokenTail ? `（尾号 ${tokenTail}）` : ""} · 填入新值可替换，更改 API 地址时须重新填写
+          </p>
+        )}
+      </div>
+      <div className="grid gap-2">
+        <Label htmlFor="n-chat-id">Chat ID</Label>
+        <Input
+          id="n-chat-id"
+          className="font-mono"
+          placeholder="-1001234567890"
+          value={config.chat_id}
+          onChange={(e) => onChange({ chat_id: e.target.value })}
+        />
+      </div>
+      <div className="grid gap-2">
+        <Label htmlFor="n-api-url">API 地址</Label>
+        <Input
+          id="n-api-url"
+          className="font-mono"
+          placeholder="https://api.telegram.org"
+          value={config.base_url}
+          onChange={(e) => onChange({ base_url: e.target.value })}
+        />
+        <p className="text-muted-foreground text-xs">留空用官方地址；自建 Bot API 反代时填写。</p>
+      </div>
+    </>
   );
 }
 

@@ -19,21 +19,17 @@ import { api } from "@/lib/api";
 import type { NotificationChannel, NotificationFilter, NotificationMeta } from "@/lib/types";
 
 import {
-  CHANNEL_FIELDS,
   type ChannelForm,
   emptyForm,
-  KIND_LABEL,
+  FilterSummary,
   parseIDs,
   parseKeywords,
-  parseKV,
   SEVERITY_OPTIONS,
-} from "./_components/channel-fields";
-import { ConfigField, FilterSummary } from "./_components/channel-form";
+  TelegramFields,
+} from "./_components/channel-form";
 import { DeliveryList } from "./_components/delivery-list";
 import { formatBacklog, StatTile } from "./_components/stat-tile";
 
-// The page owns loading, form state and API calls. Separate files define fields, render controls and display
-// delivery history.
 export default function NotifyPage() {
   const [meta, setMeta] = React.useState<NotificationMeta | null>(null);
   const [channels, setChannels] = React.useState<NotificationChannel[]>([]);
@@ -41,7 +37,7 @@ export default function NotifyPage() {
 
   const [open, setOpen] = React.useState(false);
   const [editing, setEditing] = React.useState<NotificationChannel | null>(null);
-  const [form, setForm] = React.useState<ChannelForm>(emptyForm("dingtalk"));
+  const [form, setForm] = React.useState<ChannelForm>(emptyForm);
   const [saving, setSaving] = React.useState(false);
   const [testing, setTesting] = React.useState(false);
 
@@ -71,13 +67,10 @@ export default function NotifyPage() {
   function setF(patch: Partial<ChannelForm>) {
     setForm((f) => ({ ...f, ...patch }));
   }
-  function setCfg(key: string, value: unknown) {
-    setForm((f) => ({ ...f, config: { ...f.config, [key]: value } }));
-  }
 
   function openAdd() {
     setEditing(null);
-    setForm(emptyForm(meta?.kinds[0]?.kind ?? "dingtalk"));
+    setForm(emptyForm());
     setOpen(true);
   }
 
@@ -87,12 +80,15 @@ export default function NotifyPage() {
     const f = ch.filter;
     setForm({
       name: ch.name,
-      kind: ch.kind,
       mode: ch.mode,
       enabled: ch.enabled,
       ratePerMin: String(ch.rate_per_min),
       // Retain masked credentials in form state and resubmit the markers to preserve the stored values.
-      config: { ...ch.config },
+      config: {
+        bot_token: ch.config.bot_token ?? "",
+        chat_id: ch.config.chat_id ?? "",
+        base_url: ch.config.base_url ?? "",
+      },
       minSeverity: f.min_severity ?? "",
       includeText: (f.vulnclass_include ?? []).join("\n"),
       excludeText: (f.vulnclass_exclude ?? []).join("\n"),
@@ -101,42 +97,6 @@ export default function NotifyPage() {
       onStatusChange: f.on_status_change ?? false,
     });
     setOpen(true);
-  }
-
-  // Submit masked markers unchanged to keep stored values. Other values are sent as entered. An empty field
-  // explicitly clears its value.
-  function buildConfig(): Record<string, unknown> {
-    const defs = CHANNEL_FIELDS[form.kind] ?? [];
-    const out: Record<string, unknown> = {};
-    for (const d of defs) {
-      const raw = form.config[d.key];
-      if (d.kind === "switch") {
-        out[d.key] = raw === true;
-        continue;
-      }
-      if (typeof raw === "string" && raw.startsWith("__masked__")) {
-        out[d.key] = raw;
-        continue;
-      }
-      if (d.kind === "number") {
-        const n = Number(raw);
-        out[d.key] = Number.isFinite(n) && n > 0 ? n : 0;
-        continue;
-      }
-      if (d.kind === "kv") {
-        out[d.key] = parseKV(String(raw ?? ""));
-        continue;
-      }
-      if (d.kind === "list") {
-        out[d.key] = String(raw ?? "")
-          .split(/[\s,，]+/)
-          .map((s) => s.trim())
-          .filter(Boolean);
-        continue;
-      }
-      out[d.key] = String(raw ?? "").trim();
-    }
-    return out;
   }
 
   function buildFilter(): NotificationFilter {
@@ -159,10 +119,13 @@ export default function NotifyPage() {
     try {
       const payload = {
         name: form.name.trim(),
-        kind: form.kind,
         mode: form.mode,
         enabled: form.enabled,
-        config: buildConfig(),
+        config: {
+          bot_token: form.config.bot_token.trim(),
+          chat_id: form.config.chat_id.trim(),
+          base_url: form.config.base_url.trim(),
+        },
         filter: buildFilter(),
         rate_per_min: form.ratePerMin.trim() === "" ? undefined : Number(form.ratePerMin),
       };
@@ -246,9 +209,7 @@ export default function NotifyPage() {
     }
   }
 
-  const fields = CHANNEL_FIELDS[form.kind] ?? [];
-  const secretKeys = new Set(meta?.kinds.find((k) => k.kind === form.kind)?.secret_keys ?? []);
-  const defaultRate = meta?.kinds.find((k) => k.kind === form.kind)?.default_rate_per_min ?? 0;
+  const defaultRate = meta?.kinds[0]?.default_rate_per_min;
 
   return (
     <div className="flex flex-1 flex-col gap-4 md:gap-6">
@@ -256,7 +217,7 @@ export default function NotifyPage() {
         <div>
           <h1 className="text-xl font-semibold tracking-tight">通知推送</h1>
           <p className="text-muted-foreground text-sm">
-            发现漏洞时推送到钉钉 / 飞书 / 企业微信等渠道 · 每个渠道可独立设推送时机与过滤规则
+            发现漏洞时推送到 Telegram · 每个渠道可独立设置推送时机与过滤规则
           </p>
         </div>
         {meta && (
@@ -378,7 +339,6 @@ export default function NotifyPage() {
                 </CardHeader>
                 <CardContent className="grid gap-3">
                   <div className="flex flex-wrap items-center gap-2">
-                    <Badge variant="outline">{KIND_LABEL[ch.kind] ?? ch.kind}</Badge>
                     <Badge variant="outline">{ch.mode === "digest" ? "汇总" : "实时"}</Badge>
                     {!ch.enabled && <Badge variant="outline">已停用</Badge>}
                   </div>
@@ -399,41 +359,13 @@ export default function NotifyPage() {
           <SheetHeader>
             <SheetTitle>{editing ? editing.name : "添加通知渠道"}</SheetTitle>
             <SheetDescription>
-              {KIND_LABEL[form.kind] ?? form.kind}
-              {defaultRate > 0 ? ` · 默认限流 ${defaultRate} 条/分钟` : " · 不限流"}
+              Telegram
+              {defaultRate !== undefined && (defaultRate > 0 ? ` · 默认限流 ${defaultRate} 条/分钟` : " · 不限流")}
             </SheetDescription>
           </SheetHeader>
 
           <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4">
             <div className="grid gap-4 py-4">
-              <div className="grid gap-2">
-                <Label>渠道类型</Label>
-                <Select
-                  value={form.kind}
-                  onValueChange={(v) => {
-                    // Discard the previous credential fields when changing channel type.
-                    setF({ kind: v, config: {} });
-                  }}
-                  disabled={!!editing}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {(meta?.kinds ?? []).map((k) => (
-                      <SelectItem key={k.kind} value={k.kind}>
-                        {KIND_LABEL[k.kind] ?? k.kind}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {editing && (
-                  <p className="text-muted-foreground text-xs">
-                    渠道类型不可修改——改了类型等于换一套凭据，请新建渠道。
-                  </p>
-                )}
-              </div>
-
               <div className="grid gap-2">
                 <Label htmlFor="n-name">渠道名称</Label>
                 <Input
@@ -444,21 +376,10 @@ export default function NotifyPage() {
                 />
               </div>
 
-              {fields.length === 0 ? (
-                <p className="text-muted-foreground text-sm">
-                  该渠道的表单尚未定义（前端缺 CHANNEL_FIELDS 条目），请补全后再试。
-                </p>
-              ) : (
-                fields.map((d) => (
-                  <ConfigField
-                    key={d.key}
-                    def={d}
-                    value={form.config[d.key]}
-                    isSecret={secretKeys.has(d.key)}
-                    onChange={(v) => setCfg(d.key, v)}
-                  />
-                ))
-              )}
+              <TelegramFields
+                config={form.config}
+                onChange={(patch) => setForm((f) => ({ ...f, config: { ...f.config, ...patch } }))}
+              />
 
               <div className="grid gap-2">
                 <Label>推送时机</Label>
@@ -482,7 +403,7 @@ export default function NotifyPage() {
                   id="n-rate"
                   type="number"
                   min={0}
-                  placeholder={defaultRate > 0 ? String(defaultRate) : "0 = 不限"}
+                  placeholder={defaultRate === undefined ? undefined : String(defaultRate)}
                   value={form.ratePerMin}
                   onChange={(e) => setF({ ratePerMin: e.target.value })}
                 />

@@ -22,16 +22,15 @@ func notifyTestDB(t *testing.T) *DB {
 }
 
 // newTestChannel creates a channel with test cleanup.
-func newTestChannel(t *testing.T, d *DB, kind, mode string, filter string) *NotificationChannel {
+func newTestChannel(t *testing.T, d *DB, mode, filter string) *NotificationChannel {
 	t.Helper()
 	if filter == "" {
 		filter = `{}`
 	}
 	ch := &NotificationChannel{
 		Name:       "测试渠道-" + t.Name(),
-		Kind:       kind,
 		Mode:       mode,
-		Config:     json.RawMessage(`{"webhook":"https://example.com/hook"}`),
+		Config:     json.RawMessage(`{"bot_token":"123456:fixture-token","chat_id":"123"}`),
 		Filter:     json.RawMessage(filter),
 		RatePerMin: 100,
 	}
@@ -143,9 +142,9 @@ func TestFanOutRoutesEventsByFilter(t *testing.T) {
 	d := notifyTestDB(t)
 	ctx := context.Background()
 
-	all := newTestChannel(t, d, notify.KindDingTalk, NotifyModeRealtime, `{}`)
-	onlyCritical := newTestChannel(t, d, notify.KindDingTalk, NotifyModeRealtime, `{"min_severity":"critical"}`)
-	sqlOnly := newTestChannel(t, d, notify.KindDingTalk, NotifyModeRealtime, `{"vulnclass_include":["SQL"]}`)
+	all := newTestChannel(t, d, NotifyModeRealtime, `{}`)
+	onlyCritical := newTestChannel(t, d, NotifyModeRealtime, `{"min_severity":"critical"}`)
+	sqlOnly := newTestChannel(t, d, NotifyModeRealtime, `{"vulnclass_include":["SQL"]}`)
 
 	highSQL := addTestEvent(t, d, notify.EventFindingCreated, 1001, notify.Snapshot{Severity: "high", VulnClass: "SQL注入"})
 	lowXSS := addTestEvent(t, d, notify.EventFindingCreated, 1002, notify.Snapshot{Severity: "low", VulnClass: "XSS"})
@@ -195,7 +194,7 @@ func TestFanOutRoutesEventsByFilter(t *testing.T) {
 func TestFanOutMarksEventsWithNoMatchingChannel(t *testing.T) {
 	d := notifyTestDB(t)
 	ctx := context.Background()
-	pick := newTestChannel(t, d, notify.KindDingTalk, NotifyModeRealtime, `{"vulnclass_include":["绝不匹配的类型"]}`)
+	pick := newTestChannel(t, d, NotifyModeRealtime, `{"vulnclass_include":["绝不匹配的类型"]}`)
 	_ = pick
 
 	ev := addTestEvent(t, d, notify.EventFindingCreated, 2001, notify.Snapshot{Severity: "high", VulnClass: "XSS"})
@@ -219,8 +218,8 @@ func TestClaimRealtimeDeliveriesHonorsLeaseAndMode(t *testing.T) {
 	d := notifyTestDB(t)
 	ctx := context.Background()
 
-	realtime := newTestChannel(t, d, notify.KindDingTalk, NotifyModeRealtime, `{}`)
-	digest := newTestChannel(t, d, notify.KindDingTalk, NotifyModeDigest, `{}`)
+	realtime := newTestChannel(t, d, NotifyModeRealtime, `{}`)
+	digest := newTestChannel(t, d, NotifyModeDigest, `{}`)
 
 	addTestEvent(t, d, notify.EventFindingCreated, 3001, notify.Snapshot{Severity: "high", VulnClass: "XSS"})
 	if _, _, err := d.FanOutPendingEvents(ctx, 100); err != nil {
@@ -238,9 +237,9 @@ func TestClaimRealtimeDeliveriesHonorsLeaseAndMode(t *testing.T) {
 	if got[0].State != NotifyStateSending || got[0].Attempts != 1 {
 		t.Fatalf("领取后应为 sending 且 attempts=1，得到 state=%s attempts=%d", got[0].State, got[0].Attempts)
 	}
-	// The claim includes channel config, the event snapshot, and the finding ID.
-	if got[0].Channel == nil || len(got[0].Channel.Config) == 0 {
-		t.Fatal("领取结果缺少渠道配置，渲染会失败")
+	// Claims include the event snapshot but do not load destination credentials.
+	if len(got[0].Snapshot) == 0 || got[0].ChannelName != realtime.Name {
+		t.Fatal("Claim is missing its snapshot or destination name")
 	}
 	if got[0].FindingID != 3001 {
 		t.Fatalf("finding id 未从事件带出，得到 %d", got[0].FindingID)
@@ -269,7 +268,7 @@ func TestClaimRealtimeDeliveriesHonorsLeaseAndMode(t *testing.T) {
 func TestClaimExpiredLeaseRecovers(t *testing.T) {
 	d := notifyTestDB(t)
 	ctx := context.Background()
-	ch := newTestChannel(t, d, notify.KindDingTalk, NotifyModeRealtime, `{}`)
+	ch := newTestChannel(t, d, NotifyModeRealtime, `{}`)
 	addTestEvent(t, d, notify.EventFindingCreated, 4001, notify.Snapshot{Severity: "high"})
 	if _, _, err := d.FanOutPendingEvents(ctx, 100); err != nil {
 		t.Fatal(err)
@@ -297,13 +296,15 @@ func TestClaimExpiredLeaseRecovers(t *testing.T) {
 func TestClaimSkipsDisabledChannel(t *testing.T) {
 	d := notifyTestDB(t)
 	ctx := context.Background()
-	ch := newTestChannel(t, d, notify.KindDingTalk, NotifyModeRealtime, `{}`)
+	ch := newTestChannel(t, d, NotifyModeRealtime, `{}`)
 	addTestEvent(t, d, notify.EventFindingCreated, 5001, notify.Snapshot{Severity: "high"})
 	if _, _, err := d.FanOutPendingEvents(ctx, 100); err != nil {
 		t.Fatal(err)
 	}
 	// Disabling a channel skips pending deliveries.
-	if err := d.SetNotificationChannelEnabled(ctx, ch.ID, false); err != nil {
+	off := false
+	ch.Enabled = &off
+	if _, err := d.SaveNotificationChannel(ctx, ch); err != nil {
 		t.Fatal(err)
 	}
 	var state string
@@ -325,7 +326,7 @@ func TestClaimSkipsDisabledChannel(t *testing.T) {
 func TestDigestBatchDueAndStableBatchID(t *testing.T) {
 	d := notifyTestDB(t)
 	ctx := context.Background()
-	ch := newTestChannel(t, d, notify.KindDingTalk, NotifyModeDigest, `{}`)
+	ch := newTestChannel(t, d, NotifyModeDigest, `{}`)
 	for i := 0; i < 3; i++ {
 		addTestEvent(t, d, notify.EventFindingCreated, int64(6000+i), notify.Snapshot{Severity: "high"})
 	}
@@ -401,7 +402,7 @@ func TestDigestBatchDueAndStableBatchID(t *testing.T) {
 func TestDeliveryStateTransitions(t *testing.T) {
 	d := notifyTestDB(t)
 	ctx := context.Background()
-	ch := newTestChannel(t, d, notify.KindDingTalk, NotifyModeRealtime, `{}`)
+	ch := newTestChannel(t, d, NotifyModeRealtime, `{}`)
 	addTestEvent(t, d, notify.EventFindingCreated, 7001, notify.Snapshot{Severity: "high"})
 	if _, _, err := d.FanOutPendingEvents(ctx, 100); err != nil {
 		t.Fatal(err)
@@ -461,7 +462,7 @@ func TestDeliveryStateTransitions(t *testing.T) {
 func TestListNotificationDeliveriesPagingAndFilter(t *testing.T) {
 	d := notifyTestDB(t)
 	ctx := context.Background()
-	ch := newTestChannel(t, d, notify.KindDingTalk, NotifyModeRealtime, `{}`)
+	ch := newTestChannel(t, d, NotifyModeRealtime, `{}`)
 	for i := 0; i < 5; i++ {
 		addTestEvent(t, d, notify.EventFindingCreated, int64(8000+i), notify.Snapshot{Severity: "high", Name: "分页测试"})
 	}
@@ -589,7 +590,7 @@ func TestSetFindingStatusWithNotifyOnlyEmitsOnRealChange(t *testing.T) {
 func TestNotificationStatsSnapshot(t *testing.T) {
 	d := notifyTestDB(t)
 	ctx := context.Background()
-	ch := newTestChannel(t, d, notify.KindDingTalk, NotifyModeRealtime, `{}`)
+	ch := newTestChannel(t, d, NotifyModeRealtime, `{}`)
 	addTestEvent(t, d, notify.EventFindingCreated, 9001, notify.Snapshot{Severity: "high"})
 	if _, _, err := d.FanOutPendingEvents(ctx, 100); err != nil {
 		t.Fatal(err)
@@ -617,9 +618,8 @@ func TestNotificationChannelCRUDRoundTrip(t *testing.T) {
 
 	ch := &NotificationChannel{
 		Name:       "CRUD 往返",
-		Kind:       notify.KindEmail,
 		Mode:       NotifyModeDigest,
-		Config:     json.RawMessage(`{"host":"smtp.example.com","port":587,"from":"a@b.c","to":["x@y.z"]}`),
+		Config:     json.RawMessage(`{"bot_token":"123456:fixture-token","chat_id":"123","base_url":"https://telegram.example.com"}`),
 		Filter:     json.RawMessage(`{"min_severity":"medium","on_status_change":true}`),
 		RatePerMin: 42,
 	}
@@ -643,7 +643,7 @@ func TestNotificationChannelCRUDRoundTrip(t *testing.T) {
 	if err := json.Unmarshal(got.Config, &cfg); err != nil {
 		t.Fatal(err)
 	}
-	if cfg["host"] != "smtp.example.com" {
+	if cfg["base_url"] != "https://telegram.example.com" {
 		t.Fatalf("配置未正确落库: %v", cfg)
 	}
 	var filter notify.Filter
@@ -691,8 +691,8 @@ func TestSaveNotificationChannelKeepsExplicitZeroRate(t *testing.T) {
 
 	// An explicit unlimited rate must remain zero.
 	unlimited := &NotificationChannel{
-		Name: "不限流", Kind: notify.KindDingTalk, RatePerMin: 0,
-		Config: json.RawMessage(`{"webhook":"https://example.com/h"}`),
+		Name: "不限流", RatePerMin: 0,
+		Config: json.RawMessage(`{"bot_token":"123456:fixture-token","chat_id":"123"}`),
 	}
 	id, err := d.SaveNotificationChannel(ctx, unlimited)
 	if err != nil {
@@ -712,8 +712,8 @@ func TestSaveNotificationChannelKeepsExplicitZeroRate(t *testing.T) {
 
 	// Reject negative rates instead of coercing them.
 	bad := &NotificationChannel{
-		Name: "负限流", Kind: notify.KindDingTalk, RatePerMin: -1,
-		Config: json.RawMessage(`{"webhook":"https://example.com/h"}`),
+		Name: "负限流", RatePerMin: -1,
+		Config: json.RawMessage(`{"bot_token":"123456:fixture-token","chat_id":"123"}`),
 	}
 	if _, err := d.SaveNotificationChannel(ctx, bad); err == nil {
 		t.Fatal("负限流应被拒绝")
@@ -725,7 +725,7 @@ func TestSaveNotificationChannelKeepsExplicitZeroRate(t *testing.T) {
 func TestDeleteChannelCascadesDeliveries(t *testing.T) {
 	d := notifyTestDB(t)
 	ctx := context.Background()
-	ch := newTestChannel(t, d, notify.KindDingTalk, NotifyModeRealtime, `{}`)
+	ch := newTestChannel(t, d, NotifyModeRealtime, `{}`)
 	ev := addTestEvent(t, d, notify.EventFindingCreated, 9101, notify.Snapshot{Severity: "high"})
 	if _, _, err := d.FanOutPendingEvents(ctx, 100); err != nil {
 		t.Fatal(err)
@@ -760,7 +760,7 @@ func TestDeleteChannelCascadesDeliveries(t *testing.T) {
 func TestClaimDigestBatchHonorsCallerLimit(t *testing.T) {
 	d := notifyTestDB(t)
 	ctx := context.Background()
-	ch := newTestChannel(t, d, notify.KindDingTalk, NotifyModeDigest, `{}`)
+	ch := newTestChannel(t, d, NotifyModeDigest, `{}`)
 	for i := 0; i < 10; i++ {
 		addTestEvent(t, d, notify.EventFindingCreated, int64(7000+i), notify.Snapshot{Severity: "high"})
 	}
