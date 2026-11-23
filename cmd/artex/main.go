@@ -14,6 +14,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"syscall"
 	"time"
 
@@ -42,12 +43,27 @@ func printBanner(addr string) {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "reset-password" {
+		if err := resetPassword(os.Args[2:]); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
 	var (
 		addr    = flag.String("addr", ":8787", "HTTP listen address")
 		dataDir = flag.String("data", filepath.Join(config.BaseDir(), "data"), "data directory for SQLite stores (default: data/ next to the executable)")
 		proxy   = flag.String("proxy", "127.0.0.1:8788", "traffic recording proxy address (empty to disable)")
+		migrate = flag.String("migrate-config", "", "write a TOML copy of the specified legacy JSON configuration and exit")
 	)
 	flag.Parse()
+	if *migrate != "" {
+		destination := strings.TrimSuffix(*migrate, filepath.Ext(*migrate)) + ".toml"
+		if err := config.MigrateLegacy(*migrate, destination); err != nil {
+			log.Fatal(err)
+		}
+		fmt.Printf("Wrote %s\n", destination)
+		return
+	}
 
 	// hand the build version to the server package so GET /api/health can report it
 	// to the frontend top bar.
@@ -59,32 +75,39 @@ func main() {
 	// page can show a live log stream. Do this first, to catch startup logs too.
 	server.StartLogCapture()
 
-	// surface which config file the binary reads (absolute, so `go run`'s relative
-	// "config.json" — resolved against the CWD — is unambiguous).
-	cfgPath := config.Path()
-	if abs, e := filepath.Abs(cfgPath); e == nil {
-		cfgPath = abs
+	cfg, err := config.Read()
+	if err != nil {
+		log.Fatalf("[config] %v", err)
 	}
-	if _, e := os.Stat(cfgPath); e == nil {
-		log.Printf("[config] 配置文件: %s", cfgPath)
-	} else {
-		log.Printf("[config] 配置文件: %s (不存在 — 将仅尝试环境变量 ARTEX_PG_DSN)", cfgPath)
+	if cfg.Exists {
+		log.Printf("[config] 配置文件: %s", cfg.Path)
+		if cfg.Legacy {
+			log.Print("[config] Legacy JSON configuration loaded. Use -migrate-config to create a TOML copy.")
+		}
 	}
+	dsn, source, err := cfg.PostgresDSN()
+	if err != nil {
+		log.Fatalf("[config] %v", err)
+	}
+	log.Printf("[pg] 数据库配置来源: %s", source)
 
 	sigCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	ctx, shutdown := shutdownContext(sigCtx)
 	defer shutdown(agent.AbortShutdown)
 
-	mgr, err := server.NewManager(*dataDir, *proxy)
+	mgr, err := server.OpenManager(*dataDir, *proxy, dsn)
 	if err != nil {
 		log.Fatalf("open stores: %v", err)
 	}
 	defer mgr.Close()
 
-	skillDir := config.SkillDir()
+	skillDir := cfg.SkillDir()
 	if abs, err := filepath.Abs(skillDir); err == nil {
 		skillDir = abs
+	}
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		log.Fatalf("[config] create skill directory: %v", err)
 	}
 	log.Printf("[config] skill 目录: %s", skillDir)
 	srv := server.New(ctx, mgr, skillDir, *dataDir, config.BaseDir())

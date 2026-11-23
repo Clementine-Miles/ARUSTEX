@@ -85,7 +85,7 @@ func coordinateWithSchemaMigration(tx *sql.Tx) error {
 }
 
 // DSN resolves the PostgreSQL connection string and reports where it came from.
-// Precedence: env ARTEX_PG_DSN > config file (config.json). There is no
+// Precedence: env ARTEX_PG_DSN > the application configuration file. There is no
 // built-in default — it errors if neither source is configured.
 func DSN() (dsn, source string, err error) {
 	return config.PostgresDSN()
@@ -145,6 +145,10 @@ func Open(dsn string) (*DB, error) {
 	sqlDB.SetConnMaxIdleTime(5 * time.Minute)
 	if err := sqlDB.Ping(); err != nil {
 		sqlDB.Close()
+		var parseErr *pgconn.ParseConfigError
+		if errors.As(err, &parseErr) {
+			return nil, errors.New("invalid PostgreSQL connection settings")
+		}
 		return nil, fmt.Errorf("ping postgres (%s): %w", config.Redact(dsn), err)
 	}
 	d := &DB{sqlDB}

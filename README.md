@@ -63,19 +63,19 @@ ARTEX 在 Linux amd64 或 arm64 上从本地源码编译运行。需要 Bash、G
 
 ### 配置 PostgreSQL
 
-准备本机或外部管理的 PostgreSQL 数据库和访问账号，允许该账号创建和迁移应用表。将连接信息写入 `config.json`，或设置优先级更高的 `ARTEX_PG_DSN`。设置 `ARTEX_CONFIG` 可指定配置文件路径。已有部署直接沿用原有配置。`skill_dir` 留空时使用可执行文件同级的 `skills/`。连接远程数据库时，可在连接配置中指定 `sslmode=verify-full` 及相应的 CA。
+准备本机或外部管理的 PostgreSQL 数据库和访问账号，允许该账号创建和迁移应用表。将连接信息写入 `config.toml`，或设置优先级更高的 `ARTEX_PG_DSN`。设置 `ARTEX_CONFIG` 可指定配置文件路径。旧版 JSON 配置可按[迁移说明](#迁移旧配置)转换。连接远程数据库时，可在连接配置中指定 `ssl_mode = "verify-full"` 或在 DSN 中设置 `sslmode=verify-full` 及相应的 CA。
 
 ### 编译并启动
 
 ```bash
 git clone https://github.com/Clementine-Miles/ARTEX.git
 cd ARTEX
-test -e config.json || (umask 077; cp config.example.json config.json)
-# Edit config.json to configure PostgreSQL, or set ARTEX_PG_DSN.
+test -e config.toml || (umask 077; cp config.example.toml config.toml)
+# Edit config.toml to configure PostgreSQL, or set ARTEX_PG_DSN.
 ./install.sh -addr 127.0.0.1:8787
 ```
 
-已经设置 `ARTEX_PG_DSN` 时，可以跳过创建 `config.json`。安装脚本编译当前源码后启动 ARTEX。首次访问 `http://127.0.0.1:8787/setup` 设置管理员密码。使用 Agent 前，在「LLM 配置」页填写凭据，或设置 `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`。
+已经设置 `ARTEX_PG_DSN` 时，可以跳过创建 `config.toml`。安装脚本编译当前源码后启动 ARTEX，由程序统一读取和验证配置。首次访问 `http://127.0.0.1:8787/setup` 设置管理员密码。使用 Agent 前，在「LLM 配置」页填写凭据，或设置 `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`。
 
 也可以分开编译和启动，方便先准备构建产物再启动服务。
 
@@ -90,7 +90,7 @@ test -e config.json || (umask 077; cp config.example.json config.json)
 
 ## 更新升级
 
-更新前备份 PostgreSQL、`config.json`、`data/`、`jwt.key` 和 `skills/`，或对应的自定义路径。沿用相同的数据库和目录可保留任务数据、凭据及用户安装的 Skill。若要切换数据库实例，先将旧库备份恢复到新实例，再修改连接配置。ARTEX 启动时会迁移数据库表结构。
+更新前备份 PostgreSQL、应用配置文件、`data/`、`jwt.key` 和 `skills/`，或对应的自定义路径。沿用相同的数据库和目录可保留任务数据、凭据及用户安装的 Skill。若要切换数据库实例，先将旧库备份恢复到新实例，再修改连接配置。ARTEX 启动时会迁移数据库表结构。
 
 ```bash
 ./update.sh
@@ -104,17 +104,35 @@ test -e config.json || (umask 077; cp config.example.json config.json)
 
 ## 配置
 
-**数据库**（`config.json`，或用环境变量 `ARTEX_PG_DSN` 覆盖）：
+```toml
+[database]
+host = "127.0.0.1"
+port = 5432
+user = "artex"
+password = ""
+db_name = "artex"
+ssl_mode = "disable"
 
-```json
-{
-  "database": {
-    "host": "127.0.0.1", "port": 5432,
-    "user": "artex", "password": "yourpass",
-    "dbname": "artex", "sslmode": "disable"
-  }
-}
+[skills]
+directory = ""
 ```
+
+`ARTEX_CONFIG` 优先。未指定时，先查工作目录，再查可执行文件目录，每个目录优先使用 `config.toml`，并兼容旧的 `config.json`。TOML 使用已定义的配置键，未知键和解析错误会使启动失败。
+
+`ARTEX_PG_DSN` 优先于 `[database]`。表中可用 `dsn` 指定完整连接串，或填写分字段。分字段省略 `host`、`port` 和 `ssl_mode` 时，默认分别为 `127.0.0.1`、`5432` 和 `disable`。`ARTEX_SKILL_DIR` 优先于 `[skills].directory`。留空时使用可执行文件同级的 `skills/`，相对路径从工作目录解析。
+
+### 迁移旧配置
+
+先构建本地程序，然后将旧配置转换为同目录、同名主文件的 TOML 文件。
+
+```bash
+./build.sh --backend-only
+./artex -migrate-config config.json
+```
+
+迁移保留数据库连接和 Skill 目录配置，创建仅当前用户可读写的 TOML 文件，并保留原 JSON。已有目标文件时会拒绝覆盖。迁移后的文件包含原配置中的凭据，请用同样的权限保护。若已设置 `ARTEX_CONFIG`，将其改为指向新的 TOML 文件。已安装并构建的部署可用 `./reset-password.sh` 重置管理员密码，脚本使用与服务相同的配置解析。
+
+### 运行选项
 
 **LLM**：`export ANTHROPIC_API_KEY=sk-...`（或 `OPENAI_API_KEY`），也可在 UI 的「LLM 配置」页填写。
 可选：`ARTEX_LLM_PROVIDER` / `ARTEX_LLM_MODEL` / `ARTEX_LLM_BASE_URL` / `ARTEX_LLM_PROXY`。
@@ -124,6 +142,8 @@ test -e config.json || (umask 077; cp config.example.json config.json)
 **常用参数** `./start.sh -addr 127.0.0.1:8787 -proxy 127.0.0.1:8788`。`-addr` 设置前端和 API 监听地址（默认 `:8787`），`-proxy` 设置流量录制代理地址（默认 `127.0.0.1:8788`，设为空可停用）。启动脚本会将参数传给 `artex`。
 
 **远程 MCP** 可在系统设置中选择 `http`（Streamable HTTP）或 `sse`（旧版 SSE）。旧版 SSE 的 URL 通常以 `/sse` 结尾，服务在事件流中公布接收 JSON-RPC 的地址。可为可信 MCP 服务配置请求头，例如 `Authorization=Bearer <token>`。
+
+**Telegram 通知** 在「通知推送」中配置 Bot Token、Chat ID 和可选的 Bot API 地址。每个目的地保留独立的过滤、限流以及实时或汇总投递设置。更改 Bot API 地址时需重新填写 Bot Token。投递直连 Bot API，绕过环境变量中的 HTTP 代理。自定义 Bot API 地址可含路径前缀，其凭据单独填写，地址本身不含用户信息、查询参数或片段。旧版其他渠道的记录保留在 PostgreSQL 中，升级后停止投递并从通知界面隐藏。
 
 ### 反向代理部署（HTTPS / 只开放 443）
 
@@ -220,7 +240,7 @@ flowchart TB
   subgraph SUB["支撑子系统"]
     PROXY["流量记录代理　MITM + CA 留痕"]
     GUARD["guard / intercept　工具审批门"]
-    ENR["enrich　DNS / HTTP 异步补全"]
+    NOTIFY["notify　Telegram 投递"]
     EXT["MCP · skills · memory · report"]
   end
 
@@ -236,7 +256,7 @@ flowchart TB
   GO --> DB
   WK -->|"Bash / HTTP 全程留痕"| PROXY
   WK --> GUARD
-  WK --> ENR
+  DB -->|通知队列| NOTIFY
   PL -.-> EXT
   WK -.-> EXT
   MA -.-> EXT
@@ -249,7 +269,7 @@ flowchart TB
 | **engine** | 每任务一个 `plannerLoop` + N 个 worker goroutine；意图领取、超时/暂停/drain |
 | **agent** | goals / planner / worker / mainagent，`ToolSet` 把双图暴露成 LLM 工具 |
 | **db** | 双图的 Postgres 落地（pgx）；schema 随 `go:embed` 每次启动幂等建表 |
-| **支撑** | 记录型 MITM 代理、审批门、异步补全、MCP/技能/记忆/报告 |
+| **支撑** | 记录型 MITM 代理、审批门、Telegram 通知、MCP、技能与报告 |
 
 ### 双图架构：探索图 + 资产图
 

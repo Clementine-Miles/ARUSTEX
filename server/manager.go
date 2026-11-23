@@ -16,7 +16,6 @@ import (
 
 	"github.com/Autumn-27/artex/agent"
 	pgdb "github.com/Autumn-27/artex/db"
-	"github.com/Autumn-27/artex/enrich"
 	"github.com/Autumn-27/artex/guard"
 	"github.com/Autumn-27/artex/intercept"
 	"github.com/Autumn-27/artex/traffic"
@@ -220,7 +219,6 @@ type Manager struct {
 	pg          *pgdb.DB
 	assets      *pgdb.AssetStore
 	traffic     *traffic.Traffic       // process-wide recording proxy (may be nil)
-	enrich      *enrich.Engine         // engine-side asset auto-completion (DNS/HTTP)
 	interceptor *intercept.Interceptor // user-configured tool-call interception rules
 
 	companyMu sync.Mutex // serializes task/company-scope commits with live handle registration
@@ -334,12 +332,18 @@ func (m *Manager) SetWorkers(n int) error {
 	return m.pg.SetSetting(settingWorkers, strconv.Itoa(n))
 }
 
-// Enrich returns the asset auto-completion engine (may be nil if init failed).
-func (m *Manager) Enrich() *enrich.Engine { return m.enrich }
-
-// NewManager connects to PostgreSQL and, if proxyAddr is non-empty, starts the
-// traffic-recording proxy. PostgreSQL is required (it is the single data source).
+// NewManager opens the stores using ARTEX's configured PostgreSQL connection.
 func NewManager(dir, proxyAddr string) (*Manager, error) {
+	dsn, source, err := pgdb.DSN()
+	if err != nil {
+		return nil, err
+	}
+	log.Printf("[pg] 数据库配置来源: %s", source)
+	return OpenManager(dir, proxyAddr, dsn)
+}
+
+// OpenManager opens PostgreSQL and starts the traffic proxy if configured.
+func OpenManager(dir, proxyAddr, dsn string) (*Manager, error) {
 	// Resolve the data dir to an ABSOLUTE path up front. Every data path derives
 	// from it — notably the MITM CA cert, whose path is injected into worker shells
 	// (SSL_CERT_FILE/CURL_CA_BUNDLE) and read by WebFetch. A relative path (the
@@ -352,11 +356,6 @@ func NewManager(dir, proxyAddr string) (*Manager, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
 	}
-	dsn, source, err := pgdb.DSN()
-	if err != nil {
-		return nil, err
-	}
-	log.Printf("[pg] 数据库配置来源: %s", source)
 	pg, err := pgdb.Open(dsn)
 	if err != nil {
 		return nil, err
@@ -437,7 +436,6 @@ func NewManager(dir, proxyAddr string) (*Manager, error) {
 			log.Printf("[proxy] 全局代理 %q 无效，已忽略: %v", m.globalProxy, err)
 		}
 	}
-	m.enrich = enrich.New(m.assets, m.ProxyAddr, 4)
 	// Reconcile the seeded browser MCP with the persisted capture state, so a
 	// restart with capture already on keeps Playwright routed through the proxy.
 	m.syncBrowserMCPProxy()
@@ -647,8 +645,8 @@ func (m *Manager) syncBrowserMCPProxy() {
 	proxy := m.ProxyAddr()  // "" when capture off
 	cert := m.ProxyCACert() // "" when capture off
 
-	args := stripProxyArgs(decodeStrSlice(srv.Args))
-	env := decodeStrMap(srv.Env)
+	args := stripProxyArgs(jsonStrSlice(srv.Args))
+	env := jsonStrMap(srv.Env)
 	delete(env, "NODE_EXTRA_CA_CERTS")
 	if proxy != "" {
 		args = append(args, "--proxy-server", proxy)
@@ -684,22 +682,6 @@ func stripProxyArgs(args []string) []string {
 			continue
 		}
 		out = append(out, a)
-	}
-	return out
-}
-
-func decodeStrSlice(raw json.RawMessage) []string {
-	var out []string
-	if len(raw) > 0 {
-		_ = json.Unmarshal(raw, &out)
-	}
-	return out
-}
-
-func decodeStrMap(raw json.RawMessage) map[string]string {
-	out := map[string]string{}
-	if len(raw) > 0 {
-		_ = json.Unmarshal(raw, &out)
 	}
 	return out
 }

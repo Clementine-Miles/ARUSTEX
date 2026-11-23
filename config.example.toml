@@ -1,0 +1,18 @@
+# Copy this file to config.toml or set ARTEX_CONFIG to a different path.
+# Use the application settings or environment variables for LLM configuration.
+
+[database]
+# ARTEX_PG_DSN takes precedence. A nonempty dsn replaces all fields below.
+dsn = ""
+host = "127.0.0.1"
+port = 5432
+user = "artex"
+password = ""
+db_name = "artex"
+# Use verify-full and configure trusted certificates for remote deployments.
+ssl_mode = "disable"
+
+[skills]
+# ARTEX_SKILL_DIR takes precedence. Empty defaults to skills/ beside the
+# executable. Relative paths resolve from the working directory.
+directory = ""

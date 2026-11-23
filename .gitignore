@@ -4,6 +4,8 @@
 *.db-wal
 *.db-shm
 config.json
+config.toml
+.artex-config-*
 scheduler_state.json
 __pycache__/
 *.pyc
