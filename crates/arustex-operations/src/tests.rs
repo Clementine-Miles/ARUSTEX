@@ -250,6 +250,8 @@ fn tools_are_filtered_per_role_and_schemas_reject_unknown_fields() {
         .unwrap();
     assert_eq!(status.input_schema["additionalProperties"], json!(false));
     assert_eq!(status.input_schema["type"], json!("object"));
+    assert!(!status.input_schema.to_string().contains("$ref"));
+    assert!(status.input_schema["properties"]["status"]["enum"].is_array());
 }
 
 #[tokio::test]

@@ -103,13 +103,7 @@ impl<T: TypedOperation> ErasedOperation for T {
     }
 
     fn input_schema(&self) -> serde_json::Value {
-        let schema = schemars::schema_for!(T::Input);
-        let mut value = serde_json::to_value(schema).unwrap_or_default();
-        if let Some(map) = value.as_object_mut() {
-            map.remove("$schema");
-            map.remove("title");
-        }
-        value
+        schema_for::<T::Input>()
     }
 
     async fn call_json(
@@ -121,6 +115,50 @@ impl<T: TypedOperation> ErasedOperation for T {
             CoreError::invalid(format!("invalid input for {}: {e}", self.descriptor().name))
         })?;
         self.call(ctx, typed).await
+    }
+}
+
+/// A self-contained JSON schema for `T`: `$ref`s are inlined so every provider accepts it.
+pub fn schema_for<T: JsonSchema>() -> serde_json::Value {
+    let mut value = serde_json::to_value(schemars::schema_for!(T)).unwrap_or_default();
+    let defs = value
+        .as_object_mut()
+        .and_then(|m| m.remove("$defs"))
+        .unwrap_or_default();
+    if let Some(map) = value.as_object_mut() {
+        map.remove("$schema");
+        map.remove("title");
+    }
+    inline_refs(&mut value, &defs, 0);
+    value
+}
+
+fn inline_refs(value: &mut serde_json::Value, defs: &serde_json::Value, depth: u32) {
+    match value {
+        serde_json::Value::Object(map) => {
+            if let Some(target) = map
+                .get("$ref")
+                .and_then(|r| r.as_str())
+                .and_then(|r| r.strip_prefix("#/$defs/"))
+                && let Some(def) = defs.get(target).filter(|_| depth < 16)
+            {
+                let mut def = def.clone();
+                inline_refs(&mut def, defs, depth + 1);
+                map.remove("$ref");
+                if let serde_json::Value::Object(d) = def {
+                    for (k, v) in d {
+                        map.entry(k).or_insert(v);
+                    }
+                }
+            }
+            for v in map.values_mut() {
+                inline_refs(v, defs, depth);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            items.iter_mut().for_each(|v| inline_refs(v, defs, depth))
+        }
+        _ => {}
     }
 }
 

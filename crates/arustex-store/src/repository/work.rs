@@ -190,6 +190,54 @@ impl Store {
         Ok(())
     }
 
+    /// Records of the task's datasets that no review work item covers yet, ascending.
+    pub async fn unplanned_record_ids(
+        &self,
+        task: TaskId,
+        limit: u32,
+    ) -> CoreResult<Vec<RecordId>> {
+        let ids: Vec<i64> = sqlx::query_scalar(
+            "SELECT r.id FROM records r
+             JOIN task_datasets td ON td.dataset_id = r.dataset_id AND td.task_id = $1
+             WHERE NOT EXISTS (
+                 SELECT 1 FROM work_items w
+                 WHERE w.task_id = $1 AND w.kind = 'review' AND w.status <> 'cancelled'
+                   AND r.id = ANY (w.record_ids))
+             ORDER BY r.id LIMIT $2",
+        )
+        .bind(task.0)
+        .bind(i64::from(limit))
+        .fetch_all(self.pool())
+        .await
+        .map_err(db_err)?;
+        Ok(ids.into_iter().map(RecordId).collect())
+    }
+
+    /// Review items whose session ended without an accepted result, and reviewer
+    /// verdicts that disagree with or cannot confirm a worker result.
+    pub async fn unresolved_outcomes(&self, task: TaskId) -> CoreResult<(u64, u64)> {
+        let (flagged, disputed): (i64, i64) = sqlx::query_as(
+            "SELECT
+                (SELECT count(*) FROM work_items WHERE task_id = $1 AND result ? 'needs_review'),
+                (SELECT count(*) FROM review_results WHERE task_id = $1 AND verdict <> 'match'
+                    AND status = 'pending_confirmation')",
+        )
+        .bind(task.0)
+        .fetch_one(self.pool())
+        .await
+        .map_err(db_err)?;
+        Ok((to_u64(flagged), to_u64(disputed)))
+    }
+
+    /// Whether the task has an enabled trigger (a standing task stays running when idle).
+    pub async fn has_enabled_triggers(&self, task: TaskId) -> CoreResult<bool> {
+        sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM triggers WHERE task_id = $1 AND enabled)")
+            .bind(task.0)
+            .fetch_one(self.pool())
+            .await
+            .map_err(db_err)
+    }
+
     /// Atomically claims the triggers that should fire now and marks them fired.
     /// Interval triggers fire when their period elapsed; event triggers fire when a
     /// `records_imported` event for one of the task's datasets arrived after the last
