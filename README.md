@@ -10,6 +10,10 @@ An AI-driven penetration testing platform with a Go backend and a Next.js fronte
 
 ---
 
+## Rust inspection console
+
+The Rust workspace provides a read-only Ratatui client for browsing legacy PostgreSQL records. The Go application remains the operational deployment covered below. See the [Rust setup and verification runbook](docs/migration.md).
+
 ## Approval details
 
 Expand an entry in the global approval log, a task's approval view, or an approval card in chat to see its details. ARTEX uses its own components and theme, with the detail layout based on [AegisHook's approval detail component](https://github.com/RuoJi6/AegisHook/blob/main/web/src/components/CallDetail.vue).

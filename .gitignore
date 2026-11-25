@@ -52,3 +52,7 @@ Thumbs.db
 
 # Local benchmark output
 /bench/
+
+# Rust inspection application
+/target/
+/config.rust.toml

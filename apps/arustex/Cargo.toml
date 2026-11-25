@@ -1,0 +1,14 @@
+[package]
+name = "arustex"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+arustex-app.workspace = true
+arustex-core.workspace = true
+arustex-store.workspace = true
+arustex-tui.workspace = true
+clap.workspace = true
+tokio.workspace = true
