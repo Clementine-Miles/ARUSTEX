@@ -16,7 +16,10 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
     #[error("cannot read {path}: {source}")]
-    Read { path: PathBuf, source: std::io::Error },
+    Read {
+        path: PathBuf,
+        source: std::io::Error,
+    },
     #[error("invalid configuration in {path}: {message}")]
     Parse { path: PathBuf, message: String },
     #[error("invalid configuration: {0}")]
@@ -91,7 +94,10 @@ impl SecretRef {
     }
 
     pub fn resolve(&self, name: &str, env: &dyn Environment) -> ConfigResult<Secret> {
-        let err = |message: String| ConfigError::Secret { name: name.to_owned(), message };
+        let err = |message: String| ConfigError::Secret {
+            name: name.to_owned(),
+            message,
+        };
         match (&self.env, &self.file) {
             (Some(_), Some(_)) => Err(err("set either env or file, not both".into())),
             (Some(var), None) => env
@@ -120,7 +126,10 @@ impl Default for DatabaseConfig {
     fn default() -> Self {
         Self {
             url: None,
-            url_secret: SecretRef { env: Some("ARUSTEX_DATABASE_URL".into()), file: None },
+            url_secret: SecretRef {
+                env: Some("ARUSTEX_DATABASE_URL".into()),
+                file: None,
+            },
             max_connections: 16,
             acquire_timeout_secs: 10,
             statement_timeout_secs: 30,
@@ -142,7 +151,13 @@ pub struct DaemonConfig {
 
 impl Default for DaemonConfig {
     fn default() -> Self {
-        Self { socket: None, max_clients: 32, client_queue: 512, event_buffer: 1024, request_timeout_secs: 30 }
+        Self {
+            socket: None,
+            max_clients: 32,
+            client_queue: 512,
+            event_buffer: 1024,
+            request_timeout_secs: 30,
+        }
     }
 }
 
@@ -203,7 +218,9 @@ fn default_context() -> u32 {
 impl ProviderConfig {
     pub fn effective_base_url(&self) -> Option<String> {
         self.base_url.clone().or_else(|| match self.kind {
-            ProviderKind::OpenaiChat | ProviderKind::OpenaiResponses => Some("https://api.openai.com/v1".into()),
+            ProviderKind::OpenaiChat | ProviderKind::OpenaiResponses => {
+                Some("https://api.openai.com/v1".into())
+            }
             ProviderKind::Anthropic => Some("https://api.anthropic.com".into()),
             ProviderKind::Mock => None,
         })
@@ -306,9 +323,13 @@ impl Default for TelegramConfig {
             bot_token: SecretRef::default(),
             chat_id: None,
             api_base: "https://api.telegram.org".into(),
-            events: [NotifyEvent::TaskCompleted, NotifyEvent::TaskFailed, NotifyEvent::ApprovalRequested]
-                .into_iter()
-                .collect(),
+            events: [
+                NotifyEvent::TaskCompleted,
+                NotifyEvent::TaskFailed,
+                NotifyEvent::ApprovalRequested,
+            ]
+            .into_iter()
+            .collect(),
             min_interval_secs: 3,
             max_attempts: 5,
         }
@@ -323,7 +344,9 @@ pub struct LoggingConfig {
 
 impl Default for LoggingConfig {
     fn default() -> Self {
-        Self { level: "info".into() }
+        Self {
+            level: "info".into(),
+        }
     }
 }
 
@@ -363,8 +386,7 @@ pub struct Loaded {
 fn is_loopback_http(url: &str) -> bool {
     let rest = url.strip_prefix("http://").unwrap_or("");
     let host = rest.split(['/', ':']).next().unwrap_or("");
-    matches!(host, "127.0.0.1" | "localhost" | "[")
-        || rest.starts_with("[::1]")
+    matches!(host, "127.0.0.1" | "localhost" | "[") || rest.starts_with("[::1]")
 }
 
 fn check_endpoint(what: &str, url: &str) -> ConfigResult<()> {
@@ -378,19 +400,28 @@ fn check_endpoint(what: &str, url: &str) -> ConfigResult<()> {
     if is_loopback_http(url) {
         return Ok(());
     }
-    Err(invalid(format!("{what}: endpoint must use https (plain http is allowed only on loopback): {url}")))
+    Err(invalid(format!(
+        "{what}: endpoint must use https (plain http is allowed only on loopback): {url}"
+    )))
 }
 
 fn url_has_password(url: &str) -> bool {
-    let Some(rest) = url.split_once("://").map(|(_, r)| r) else { return false };
+    let Some(rest) = url.split_once("://").map(|(_, r)| r) else {
+        return false;
+    };
     let authority = rest.split(['/', '?']).next().unwrap_or("");
-    authority.rsplit_once('@').is_some_and(|(userinfo, _)| userinfo.contains(':'))
+    authority
+        .rsplit_once('@')
+        .is_some_and(|(userinfo, _)| userinfo.contains(':'))
         || url.contains("password=")
 }
 
 impl Config {
     pub fn parse(text: &str, path: &Path) -> ConfigResult<Self> {
-        toml::from_str(text).map_err(|e| ConfigError::Parse { path: path.to_owned(), message: e.to_string() })
+        toml::from_str(text).map_err(|e| ConfigError::Parse {
+            path: path.to_owned(),
+            message: e.to_string(),
+        })
     }
 
     /// Structural validation that does not touch secrets.
@@ -408,7 +439,10 @@ impl Config {
         if self.database.max_connections == 0 || self.database.max_connections > 256 {
             return Err(invalid("database.max_connections must be 1..=256"));
         }
-        if self.daemon.max_clients == 0 || self.daemon.client_queue < 16 || self.daemon.event_buffer < 16 {
+        if self.daemon.max_clients == 0
+            || self.daemon.client_queue < 16
+            || self.daemon.event_buffer < 16
+        {
             return Err(invalid("daemon queue sizes are too small"));
         }
         let mut names = BTreeSet::new();
@@ -416,9 +450,15 @@ impl Config {
         for p in &self.providers {
             if p.name.is_empty()
                 || p.name.len() > 64
-                || !p.name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+                || !p
+                    .name
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
             {
-                return Err(invalid(format!("provider name {:?} must be 1..=64 of [A-Za-z0-9_-]", p.name)));
+                return Err(invalid(format!(
+                    "provider name {:?} must be 1..=64 of [A-Za-z0-9_-]",
+                    p.name
+                )));
             }
             if !names.insert(p.name.as_str()) {
                 return Err(invalid(format!("duplicate provider {}", p.name)));
@@ -431,47 +471,75 @@ impl Config {
             }
             if p.kind == ProviderKind::Mock {
                 if p.base_url.is_some() || p.api_key.is_set() {
-                    return Err(invalid(format!("provider {}: the mock provider takes no endpoint or key", p.name)));
+                    return Err(invalid(format!(
+                        "provider {}: the mock provider takes no endpoint or key",
+                        p.name
+                    )));
                 }
             } else {
                 if let Some(url) = p.effective_base_url() {
                     check_endpoint(&format!("provider {}", p.name), &url)?;
                 }
                 if !p.api_key.is_set() {
-                    return Err(invalid(format!("provider {}: api_key.env or api_key.file is required", p.name)));
+                    return Err(invalid(format!(
+                        "provider {}: api_key.env or api_key.file is required",
+                        p.name
+                    )));
                 }
             }
             if p.timeout_secs == 0 || p.timeout_secs > 3600 || p.max_retries > 10 {
-                return Err(invalid(format!("provider {}: timeout or retry limits out of range", p.name)));
+                return Err(invalid(format!(
+                    "provider {}: timeout or retry limits out of range",
+                    p.name
+                )));
             }
         }
         if defaults > 1 {
             return Err(invalid("at most one provider may be the default"));
         }
         for a in &self.agents {
-            if !matches!(a.key.as_str(), "planner" | "worker" | "assistant" | "reviewer") {
-                return Err(invalid(format!("unknown agent {}; agents are planner, worker, assistant, reviewer", a.key)));
+            if !matches!(
+                a.key.as_str(),
+                "planner" | "worker" | "assistant" | "reviewer"
+            ) {
+                return Err(invalid(format!(
+                    "unknown agent {}; agents are planner, worker, assistant, reviewer",
+                    a.key
+                )));
             }
             if let Some(profile) = &a.model_profile
                 && !names.contains(profile.as_str())
             {
-                return Err(invalid(format!("agent {}: unknown model profile {profile}", a.key)));
+                return Err(invalid(format!(
+                    "agent {}: unknown model profile {profile}",
+                    a.key
+                )));
             }
             if a.max_turns == Some(0) || a.max_turns.is_some_and(|t| t > 200) {
-                return Err(invalid(format!("agent {}: max_turns must be 1..=200", a.key)));
+                return Err(invalid(format!(
+                    "agent {}: max_turns must be 1..=200",
+                    a.key
+                )));
             }
         }
-        if self.scheduler.lease_secs < 10 || self.scheduler.max_concurrent_sessions == 0 || self.scheduler.max_attempts == 0 {
+        if self.scheduler.lease_secs < 10
+            || self.scheduler.max_concurrent_sessions == 0
+            || self.scheduler.max_attempts == 0
+        {
             return Err(invalid("scheduler limits out of range"));
         }
         if self.limits.max_record_body_bytes > self.limits.max_record_line_bytes {
-            return Err(invalid("limits.max_record_body_bytes cannot exceed max_record_line_bytes"));
+            return Err(invalid(
+                "limits.max_record_body_bytes cannot exceed max_record_line_bytes",
+            ));
         }
         let t = &self.telegram;
         check_endpoint("telegram.api_base", &t.api_base)?;
         if t.enabled {
             if !t.bot_token.is_set() {
-                return Err(invalid("telegram.bot_token (env or file) is required when enabled"));
+                return Err(invalid(
+                    "telegram.bot_token (env or file) is required when enabled",
+                ));
             }
             if t.chat_id.is_none() {
                 return Err(invalid("telegram.chat_id is required when enabled"));
@@ -484,7 +552,10 @@ impl Config {
     }
 
     pub fn default_provider(&self) -> Option<&ProviderConfig> {
-        self.providers.iter().find(|p| p.default).or_else(|| self.providers.first())
+        self.providers
+            .iter()
+            .find(|p| p.default)
+            .or_else(|| self.providers.first())
     }
 
     pub fn statement_timeout(&self) -> Duration {
@@ -504,7 +575,11 @@ fn flatten(prefix: &str, value: &serde_json::Value, out: &mut Vec<(String, Strin
     match value {
         serde_json::Value::Object(map) => {
             for (k, v) in map {
-                let key = if prefix.is_empty() { k.clone() } else { format!("{prefix}.{k}") };
+                let key = if prefix.is_empty() {
+                    k.clone()
+                } else {
+                    format!("{prefix}.{k}")
+                };
                 flatten(&key, v, out);
             }
         }
@@ -513,11 +588,14 @@ fn flatten(prefix: &str, value: &serde_json::Value, out: &mut Vec<(String, Strin
                 flatten(&format!("{prefix}[{i}]"), v, out);
             }
         }
-        other => out.push((prefix.to_owned(), match other {
-            serde_json::Value::String(s) => s.clone(),
-            serde_json::Value::Null => "-".into(),
-            v => v.to_string(),
-        })),
+        other => out.push((
+            prefix.to_owned(),
+            match other {
+                serde_json::Value::String(s) => s.clone(),
+                serde_json::Value::Null => "-".into(),
+                v => v.to_string(),
+            },
+        )),
     }
 }
 
@@ -540,7 +618,9 @@ pub fn default_socket(env: &dyn Environment) -> PathBuf {
         Some(dir) => PathBuf::from(dir).join("arustex/arustex.sock"),
         None => {
             use std::os::unix::fs::MetadataExt;
-            let uid = std::fs::metadata("/proc/self").map(|m| m.uid()).unwrap_or(0);
+            let uid = std::fs::metadata("/proc/self")
+                .map(|m| m.uid())
+                .unwrap_or(0);
             PathBuf::from(format!("/tmp/arustex-{uid}/arustex.sock"))
         }
     }
@@ -548,16 +628,29 @@ pub fn default_socket(env: &dyn Environment) -> PathBuf {
 
 /// Loads the configuration file (if any), applies environment and command-line
 /// overrides, validates, and resolves secrets.
-pub fn load(cli: &CliOverrides, env: &dyn Environment, resolve_providers: bool) -> ConfigResult<Loaded> {
-    let explicit = cli.config_path.clone().or_else(|| env.var("ARUSTEX_CONFIG").map(PathBuf::from));
+pub fn load(
+    cli: &CliOverrides,
+    env: &dyn Environment,
+    resolve_providers: bool,
+) -> ConfigResult<Loaded> {
+    let explicit = cli
+        .config_path
+        .clone()
+        .or_else(|| env.var("ARUSTEX_CONFIG").map(PathBuf::from));
     let (mut config, source) = match explicit {
         Some(path) => {
-            let text = std::fs::read_to_string(&path).map_err(|source| ConfigError::Read { path: path.clone(), source })?;
+            let text = std::fs::read_to_string(&path).map_err(|source| ConfigError::Read {
+                path: path.clone(),
+                source,
+            })?;
             (Config::parse(&text, &path)?, Some(path))
         }
         None => match default_config_paths(env).into_iter().find(|p| p.is_file()) {
             Some(path) => {
-                let text = std::fs::read_to_string(&path).map_err(|source| ConfigError::Read { path: path.clone(), source })?;
+                let text = std::fs::read_to_string(&path).map_err(|source| ConfigError::Read {
+                    path: path.clone(),
+                    source,
+                })?;
                 (Config::parse(&text, &path)?, Some(path))
             }
             None => (Config::default(), None),
@@ -566,14 +659,22 @@ pub fn load(cli: &CliOverrides, env: &dyn Environment, resolve_providers: bool) 
     if let Some(level) = cli.log_level.clone().or_else(|| env.var("ARUSTEX_LOG")) {
         config.logging.level = level;
     }
-    if let Some(socket) = cli.socket.clone().or_else(|| env.var("ARUSTEX_SOCKET").map(PathBuf::from)) {
+    if let Some(socket) = cli
+        .socket
+        .clone()
+        .or_else(|| env.var("ARUSTEX_SOCKET").map(PathBuf::from))
+    {
         config.daemon.socket = Some(socket);
     }
     config.validate()?;
 
     let database_url = match (&cli.database_url, &config.database.url) {
         (Some(url), _) => Secret::new(url.clone()),
-        (None, file_url) => match config.database.url_secret.resolve("database.url_secret", env) {
+        (None, file_url) => match config
+            .database
+            .url_secret
+            .resolve("database.url_secret", env)
+        {
             Ok(secret) => secret,
             Err(err) => match file_url {
                 Some(url) => Secret::new(url.clone()),
@@ -581,22 +682,41 @@ pub fn load(cli: &CliOverrides, env: &dyn Environment, resolve_providers: bool) 
             },
         },
     };
-    let socket = config.daemon.socket.clone().unwrap_or_else(|| default_socket(env));
+    let socket = config
+        .daemon
+        .socket
+        .clone()
+        .unwrap_or_else(|| default_socket(env));
     let mut provider_keys = Vec::new();
     for p in &config.providers {
         let key = if p.kind == ProviderKind::Mock || !resolve_providers {
             None
         } else {
-            Some(p.api_key.resolve(&format!("providers.{}.api_key", p.name), env)?)
+            Some(
+                p.api_key
+                    .resolve(&format!("providers.{}.api_key", p.name), env)?,
+            )
         };
         provider_keys.push((p.name.clone(), key));
     }
     let telegram_token = if config.telegram.enabled {
-        Some(config.telegram.bot_token.resolve("telegram.bot_token", env)?)
+        Some(
+            config
+                .telegram
+                .bot_token
+                .resolve("telegram.bot_token", env)?,
+        )
     } else {
         None
     };
-    Ok(Loaded { config, source, database_url, socket, provider_keys, telegram_token })
+    Ok(Loaded {
+        config,
+        source,
+        database_url,
+        socket,
+        provider_keys,
+        telegram_token,
+    })
 }
 
 #[cfg(test)]
@@ -606,7 +726,10 @@ mod tests {
     use super::*;
 
     fn env(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
-        pairs.iter().map(|(k, v)| ((*k).to_owned(), (*v).to_owned())).collect()
+        pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+            .collect()
     }
 
     fn write(dir: &Path, name: &str, body: &str) -> PathBuf {
@@ -625,33 +748,66 @@ mod tests {
 
     #[test]
     fn rejects_unknown_keys_and_plaintext_secrets() {
-        let err = Config::parse("[[providers]]\nname='a'\nkind='anthropic'\nmodel='m'\napi_key='sk-1'\n", Path::new("x"))
-            .unwrap_err();
+        let err = Config::parse(
+            "[[providers]]\nname='a'\nkind='anthropic'\nmodel='m'\napi_key='sk-1'\n",
+            Path::new("x"),
+        )
+        .unwrap_err();
         assert!(err.to_string().contains("api_key"), "{err}");
         assert!(Config::parse("[database]\npasword='x'\n", Path::new("x")).is_err());
-        let cfg = Config::parse("[database]\nurl='postgres://u:secret@h/db'\n", Path::new("x")).unwrap();
+        let cfg = Config::parse(
+            "[database]\nurl='postgres://u:secret@h/db'\n",
+            Path::new("x"),
+        )
+        .unwrap();
         assert!(cfg.validate().unwrap_err().to_string().contains("password"));
     }
 
     #[test]
     fn enforces_https_endpoints() {
         let base = "[[providers]]\nname='a'\nkind='openai_chat'\nmodel='m'\napi_key={env='K'}\n";
-        let ok = Config::parse(&format!("{base}base_url='https://llm.example.com/v1'\n"), Path::new("x")).unwrap();
+        let ok = Config::parse(
+            &format!("{base}base_url='https://llm.example.com/v1'\n"),
+            Path::new("x"),
+        )
+        .unwrap();
         ok.validate().unwrap();
-        let local = Config::parse(&format!("{base}base_url='http://127.0.0.1:8080/v1'\n"), Path::new("x")).unwrap();
+        let local = Config::parse(
+            &format!("{base}base_url='http://127.0.0.1:8080/v1'\n"),
+            Path::new("x"),
+        )
+        .unwrap();
         local.validate().unwrap();
-        let bad = Config::parse(&format!("{base}base_url='http://llm.example.com/v1'\n"), Path::new("x")).unwrap();
+        let bad = Config::parse(
+            &format!("{base}base_url='http://llm.example.com/v1'\n"),
+            Path::new("x"),
+        )
+        .unwrap();
         assert!(bad.validate().is_err());
-        let creds = Config::parse(&format!("{base}base_url='https://user:pw@llm.example.com'\n"), Path::new("x")).unwrap();
+        let creds = Config::parse(
+            &format!("{base}base_url='https://user:pw@llm.example.com'\n"),
+            Path::new("x"),
+        )
+        .unwrap();
         assert!(creds.validate().is_err());
     }
 
     #[test]
     fn precedence_cli_over_env_over_file() {
         let dir = tempfile::tempdir().unwrap();
-        let path = write(dir.path(), "c.toml", "[daemon]\nsocket='/file.sock'\n[logging]\nlevel='warn'\n");
-        let e = env(&[("ARUSTEX_DATABASE_URL", "postgres://env/db"), ("ARUSTEX_SOCKET", "/env.sock")]);
-        let cli = CliOverrides { config_path: Some(path.clone()), ..Default::default() };
+        let path = write(
+            dir.path(),
+            "c.toml",
+            "[daemon]\nsocket='/file.sock'\n[logging]\nlevel='warn'\n",
+        );
+        let e = env(&[
+            ("ARUSTEX_DATABASE_URL", "postgres://env/db"),
+            ("ARUSTEX_SOCKET", "/env.sock"),
+        ]);
+        let cli = CliOverrides {
+            config_path: Some(path.clone()),
+            ..Default::default()
+        };
         let loaded = load(&cli, &e, true).unwrap();
         assert_eq!(loaded.socket, PathBuf::from("/env.sock"));
         assert_eq!(loaded.database_url.expose(), "postgres://env/db");
@@ -674,11 +830,22 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let key = write(dir.path(), "key", "sk-file\n");
         std::fs::set_permissions(&key, std::fs::Permissions::from_mode(0o644)).unwrap();
-        let r = SecretRef { env: None, file: Some(key.clone()) };
-        assert!(r.resolve("k", &env(&[])).unwrap_err().to_string().contains("chmod 600"));
+        let r = SecretRef {
+            env: None,
+            file: Some(key.clone()),
+        };
+        assert!(
+            r.resolve("k", &env(&[]))
+                .unwrap_err()
+                .to_string()
+                .contains("chmod 600")
+        );
         std::fs::set_permissions(&key, std::fs::Permissions::from_mode(0o600)).unwrap();
         assert_eq!(r.resolve("k", &env(&[])).unwrap().expose(), "sk-file");
-        let both = SecretRef { env: Some("X".into()), file: Some(key) };
+        let both = SecretRef {
+            env: Some("X".into()),
+            file: Some(key),
+        };
         assert!(both.resolve("k", &env(&[("X", "y")])).is_err());
     }
 
@@ -686,12 +853,31 @@ mod tests {
     fn telegram_requires_token_and_chat_when_enabled() {
         let cfg = Config::parse("[telegram]\nenabled=true\n", Path::new("x")).unwrap();
         assert!(cfg.validate().is_err());
-        let cfg = Config::parse("[telegram]\nenabled=true\nchat_id=42\nbot_token={env='TG'}\n", Path::new("x")).unwrap();
+        let cfg = Config::parse(
+            "[telegram]\nenabled=true\nchat_id=42\nbot_token={env='TG'}\n",
+            Path::new("x"),
+        )
+        .unwrap();
         cfg.validate().unwrap();
         let dir = tempfile::tempdir().unwrap();
-        let path = write(dir.path(), "c.toml", "[telegram]\nenabled=true\nchat_id=42\nbot_token={env='TG'}\n");
-        let cli = CliOverrides { config_path: Some(path), ..Default::default() };
-        let loaded = load(&cli, &env(&[("ARUSTEX_DATABASE_URL", "postgres://h/d"), ("TG", "123:abc")]), true).unwrap();
+        let path = write(
+            dir.path(),
+            "c.toml",
+            "[telegram]\nenabled=true\nchat_id=42\nbot_token={env='TG'}\n",
+        );
+        let cli = CliOverrides {
+            config_path: Some(path),
+            ..Default::default()
+        };
+        let loaded = load(
+            &cli,
+            &env(&[
+                ("ARUSTEX_DATABASE_URL", "postgres://h/d"),
+                ("TG", "123:abc"),
+            ]),
+            true,
+        )
+        .unwrap();
         assert_eq!(loaded.telegram_token.unwrap().expose(), "123:abc");
     }
 
@@ -703,7 +889,11 @@ mod tests {
         )
         .unwrap();
         let entries = cfg.redacted_entries();
-        assert!(entries.iter().any(|(k, v)| k == "providers[0].api_key.env" && v == "ANTHROPIC_KEY"));
+        assert!(
+            entries
+                .iter()
+                .any(|(k, v)| k == "providers[0].api_key.env" && v == "ANTHROPIC_KEY")
+        );
         assert!(entries.iter().all(|(_, v)| !v.starts_with("sk-")));
     }
 }
