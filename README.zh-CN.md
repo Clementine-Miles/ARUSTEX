@@ -36,7 +36,7 @@ ARTEX 在 Linux amd64 或 arm64 上从本地源码编译运行。需要 Bash、G
 ### 编译并启动
 
 ```bash
-git clone https://github.com/Clementine-Miles/ARTEX.git
+git clone https://github.com/Clementine-Miles/ARUSTEX.git ARTEX
 cd ARTEX
 test -e config.toml || (umask 077; cp config.example.toml config.toml)
 # Edit config.toml to configure PostgreSQL, or set ARTEX_PG_DSN.

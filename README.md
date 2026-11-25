@@ -31,7 +31,7 @@ Prepare a local or externally managed PostgreSQL database. Give the ARTEX databa
 ### Build and start
 
 ```bash
-git clone https://github.com/Clementine-Miles/ARTEX.git
+git clone https://github.com/Clementine-Miles/ARUSTEX.git ARTEX
 cd ARTEX
 test -e config.toml || (umask 077; cp config.example.toml config.toml)
 # Edit config.toml to configure PostgreSQL, or set ARTEX_PG_DSN.
