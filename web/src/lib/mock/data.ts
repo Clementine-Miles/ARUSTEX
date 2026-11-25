@@ -1906,7 +1906,7 @@ export const activity: Activity[] = [
     cache_write_tokens: 11000,
   },
 
-  // work#5 · i5 IDOR（running）
+    // work#5 · i5 IDOR (running)
   {
     seq: 50,
     worker: "work#5",
@@ -2522,7 +2522,7 @@ export const activity: Activity[] = [
     cache_write_tokens: 9500,
   },
 
-  // work#12 · i12 Kerberoasting（done）
+    // work#12 · i12 Kerberoasting (done)
   {
     seq: 380,
     worker: "work#12",

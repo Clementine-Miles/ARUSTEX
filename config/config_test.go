@@ -44,8 +44,8 @@ directory = "relative/skills"
 `)
 
 	s, err := Read()
-	if err != nil || s.Path != tomlPath || !s.Exists || s.Legacy {
-		t.Fatalf("selected path %q, exists %t, legacy %t, err %v", s.Path, s.Exists, s.Legacy, err)
+	if err != nil || s.Path != tomlPath || !s.Exists {
+		t.Fatalf("selected path %q, exists %t, err %v", s.Path, s.Exists, err)
 	}
 	if got, _, err := s.PostgresDSN(); err != nil || got != "postgres://u:p@10.1.2.3:6000/d?sslmode=require" {
 		t.Fatal("did not build DSN from TOML components")
@@ -57,10 +57,12 @@ directory = "relative/skills"
 		t.Fatal("config resolution created the skill directory")
 	}
 
-	t.Setenv("ARTEX_CONFIG", legacyPath)
-	legacy, err := Read()
-	if err != nil || legacy.Path != legacyPath || !legacy.Legacy || legacy.SkillDir() != "legacy-skills" {
-		t.Fatal("explicit legacy configuration did not win")
+	customPath := filepath.Join(dir, "custom.toml")
+	writeFixture(t, customPath, "[skills]\ndirectory = 'custom-skills'\n")
+	t.Setenv("ARTEX_CONFIG", customPath)
+	custom, err := Read()
+	if err != nil || custom.Path != customPath || custom.SkillDir() != "custom-skills" {
+		t.Fatal("ARTEX_CONFIG did not select the custom TOML file")
 	}
 	if explicit, err := ReadPath(tomlPath); err != nil || explicit.Path != tomlPath {
 		t.Fatal("explicit path did not win over ARTEX_CONFIG")
@@ -101,15 +103,16 @@ func TestMissingAndLegacyFiles(t *testing.T) {
 	t.Setenv("ARTEX_PG_DSN", "")
 	legacy := `{"database":{"dsn":"postgres://legacy/db"},"skill_dir":"legacy-skills"}`
 	writeFixture(t, "config.json", legacy)
-	s, err = Read()
-	if err != nil || !s.Exists || !s.Legacy || s.SkillDir() != "legacy-skills" {
-		t.Fatal("should fall back to legacy config.json")
+	if _, err := Read(); err == nil || !strings.Contains(err.Error(), "-migrate-config") {
+		t.Fatal("a discovered legacy config.json should require migration")
 	}
+	writeFixture(t, "config.toml", "[skills]\ndirectory = 'current-skills'\n")
 	writeFixture(t, "custom.settings", legacy)
-	t.Setenv("ARTEX_CONFIG", "custom.settings")
-	s, err = Read()
-	if err != nil || !s.Legacy {
-		t.Fatal("a legacy custom filename should be detected by content")
+	for _, path := range []string{"config.json", "custom.settings"} {
+		t.Setenv("ARTEX_CONFIG", path)
+		if _, err := Read(); err == nil || !strings.Contains(err.Error(), "-migrate-config") {
+			t.Fatalf("explicit legacy path %q should require migration", path)
+		}
 	}
 }
 
@@ -162,10 +165,6 @@ func TestMigrateLegacyPreservesSettingsAndRefusesOverwrite(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeFixture(t, source, string(legacy))
-	before, err := ReadPath(source)
-	if err != nil {
-		t.Fatal(err)
-	}
 	t.Setenv("ARTEX_PG_DSN", "postgres://override/db")
 	t.Setenv("ARTEX_SKILL_DIR", "override-skills")
 	if err := MigrateLegacy(source, target); err != nil {
@@ -174,10 +173,12 @@ func TestMigrateLegacyPreservesSettingsAndRefusesOverwrite(t *testing.T) {
 	t.Setenv("ARTEX_PG_DSN", "")
 	t.Setenv("ARTEX_SKILL_DIR", "")
 	after, err := Read()
-	if err != nil || after.Legacy || after.Path != target {
+	if err != nil || after.Path != target {
 		t.Fatal("could not read the migrated TOML file")
 	}
-	if before.Database() != after.Database() || after.SkillDir() != before.SkillDir() {
+	want := Database{Host: "db.internal", Port: 5439, User: "operator", Password: password,
+		DBName: "artex-data", SSLMode: "verify-full"}
+	if after.Database() != want || after.SkillDir() != "custom/skills" {
 		t.Fatal("migration changed a database field or skill directory")
 	}
 	if info, err := os.Stat(target); err != nil || info.Mode().Perm() != 0o600 {

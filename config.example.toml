@@ -1,5 +1,6 @@
 # Copy this file to config.toml or set ARTEX_CONFIG to a different path.
-# Use the application settings or environment variables for LLM configuration.
+# The backend reads environment overrides from its process environment.
+# Configure the LLM in the application settings or through environment variables.
 
 [database]
 # ARTEX_PG_DSN takes precedence. A nonempty dsn replaces all fields below.

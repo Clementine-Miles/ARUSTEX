@@ -81,9 +81,6 @@ func main() {
 	}
 	if cfg.Exists {
 		log.Printf("[config] 配置文件: %s", cfg.Path)
-		if cfg.Legacy {
-			log.Print("[config] Legacy JSON configuration loaded. Use -migrate-config to create a TOML copy.")
-		}
 	}
 	dsn, source, err := cfg.PostgresDSN()
 	if err != nil {

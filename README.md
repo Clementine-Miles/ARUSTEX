@@ -2,70 +2,33 @@
 
 # ARTEX
 
-AI 自主渗透测试系统（Go 后端 + Next.js 前端）
+An AI-driven penetration testing platform with a Go backend and a Next.js frontend.
+
+[English](README.md) · [简体中文](README.zh-CN.md)
 
 </div>
 
 ---
 
-## 截图预览
+## Approval details
 
-| 仪表盘（总览 / Token 消耗 / 活动流） | 任务列表 |
-| :---: | :---: |
-| ![仪表盘](screenshots/dashboard.png) | ![任务](screenshots/tasks.png) |
+Expand an entry in the global approval log, a task's approval view, or an approval card in chat to see its details. ARTEX uses its own components and theme, with the detail layout based on [AegisHook's approval detail component](https://github.com/RuoJi6/AegisHook/blob/main/web/src/components/CallDetail.vue).
 
-| 任务 · 执行过程（会话 / 工具调用） | 探索链路 |
-| :---: | :---: |
-| ![执行过程](screenshots/sessions.png) | ![探索链路](screenshots/graph.png) |
+## Asset synchronization with ScopeSentry
 
-| 发现 | 资产 |
-| :---: | :---: |
-| ![发现](screenshots/findings.png) | ![资产](screenshots/assets.png) |
-
-| 资产覆盖图（力导向布局 · 已测高亮 · 节点折叠展开） |
-| :---: |
-| ![资产覆盖图](screenshots/assets_test.png) |
-
-| 流量录制 | 人在环路对话 |
-| :---: | :---: |
-| ![流量](screenshots/traffic.png) | ![对话](screenshots/chat.png) |
-
-| Agent 管理 | LLM 配置 |
-| :---: | :---: |
-| ![Agent](screenshots/agents.png) | ![LLM](screenshots/llm.png) |
-
-| 拦截审批 | 后端日志 |
-| :---: | :---: |
-| ![拦截](screenshots/intercept.png) | ![日志](screenshots/logs.png) |
-
+ARTEX imports existing asset records directly from [ScopeSentry](https://github.com/Autumn-27/ScopeSentry). Enter the ScopeSentry URL and API key on the Asset Sync page, then select a project or task and the asset types to import. ARTEX reconciles the imported records with organization scope and adds them to the asset graph. Supported types include domains, subdomains, IP addresses, ports, sites, and endpoints.
 
 ---
 
-## 审批记录详情
+## Installation
 
-全局「审批记录」、任务内「拦截审批」及对话中的审批卡片均支持展开查看详情。展示结构参考
-[AegisHook 的审批详情组件](https://github.com/RuoJi6/AegisHook/blob/main/web/src/components/CallDetail.vue)，沿用 ARTEX 的组件和主题：
+ARTEX builds from source on Linux amd64 and arm64. You need Bash, Go 1.26.3 or later, and access to PostgreSQL. Building the embedded frontend also requires Node.js 22 or later and npm. Use Git to clone or update the checkout. Install the tools required by the skills and MCP servers you enable, and make their executables available on the ARTEX process's `PATH`.
 
+### PostgreSQL setup
 
-## 资产同步（ScopeSentry）
+Prepare a local or externally managed PostgreSQL database. Give the ARTEX database account permission to create and migrate application tables. Set the connection in `config.toml` or supply `ARTEX_PG_DSN`, which takes precedence. Use `ARTEX_CONFIG` to select a different configuration file. See [legacy configuration migration](#legacy-configuration-migration) for existing JSON files. For remote databases, configure the appropriate CA and use `ssl_mode = "verify-full"` in TOML or `sslmode=verify-full` in the DSN.
 
-支持从 [ScopeSentry](https://github.com/Autumn-27/ScopeSentry) 直接同步资产数据，免去重复收集：
-
-- 在「**资产同步**」页填 ScopeSentry 的地址与 API Key，接入数据源；
-- 按**项目**或**任务**维度选择要同步的目标与资产类型（域名 / 子域 / IP / 端口 / 站点 / 端点…）；
-- 一键导入并按公司资产范围归并，直接进入 ARTEX 的资产图供 agent 探索使用。
-
----
-
-## 安装
-
-ARTEX 在 Linux amd64 或 arm64 上从本地源码编译运行。需要 Bash、Go 1.26.3 或更高版本，以及可访问的 PostgreSQL。构建内嵌前端时还需要 Node.js 22 或更高版本和 npm。克隆或同步源码需要 Git。按启用的 Skill 或 MCP 配置安装所需工具，并将可执行文件加入 ARTEX 进程的 `PATH`。
-
-### 配置 PostgreSQL
-
-准备本机或外部管理的 PostgreSQL 数据库和访问账号，允许该账号创建和迁移应用表。将连接信息写入 `config.toml`，或设置优先级更高的 `ARTEX_PG_DSN`。设置 `ARTEX_CONFIG` 可指定配置文件路径。旧版 JSON 配置可按[迁移说明](#迁移旧配置)转换。连接远程数据库时，可在连接配置中指定 `ssl_mode = "verify-full"` 或在 DSN 中设置 `sslmode=verify-full` 及相应的 CA。
-
-### 编译并启动
+### Build and start
 
 ```bash
 git clone https://github.com/Clementine-Miles/ARTEX.git
@@ -75,34 +38,36 @@ test -e config.toml || (umask 077; cp config.example.toml config.toml)
 ./install.sh -addr 127.0.0.1:8787
 ```
 
-已经设置 `ARTEX_PG_DSN` 时，可以跳过创建 `config.toml`。安装脚本编译当前源码后启动 ARTEX，由程序统一读取和验证配置。首次访问 `http://127.0.0.1:8787/setup` 设置管理员密码。使用 Agent 前，在「LLM 配置」页填写凭据，或设置 `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`。
+You can skip creating `config.toml` if `ARTEX_PG_DSN` is already set. The install script builds the current source and starts ARTEX. The application reads and validates the configuration. On first use, visit `http://127.0.0.1:8787/setup` to set the administrator password. Before running agents, configure a provider on the LLM Configuration page or set `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`.
 
-也可以分开编译和启动，方便先准备构建产物再启动服务。
+To prepare an executable before starting the service, run the build and startup scripts separately.
 
 ```bash
 ./build.sh
 ./start.sh -addr 127.0.0.1:8787
 ```
 
-构建默认将 Next.js 静态前端嵌入项目根目录的 `artex`。添加 `--backend-only` 可通过 `build.sh` 或 `install.sh` 仅编译 Go 后端。首次构建所缺的 Go 和 npm 依赖由各自的工具解析。启动脚本直接运行已有的本地编译产物。前台运行时可按 Ctrl-C 停止，由系统服务托管时可发送 SIGTERM，两种方式均可触发优雅关停。
+By default, the build embeds the Next.js static frontend in the `artex` executable at the project root. Pass `--backend-only` to `build.sh` or `install.sh` to build just the Go backend. Go and npm resolve missing dependencies during the build. The startup script runs the existing local executable. Use Ctrl+C in the foreground or send SIGTERM through the service manager for graceful shutdown.
 
 ---
 
-## 更新升级
+## Upgrading
 
-更新前备份 PostgreSQL、应用配置文件、`data/`、`jwt.key` 和 `skills/`，或对应的自定义路径。沿用相同的数据库和目录可保留任务数据、凭据及用户安装的 Skill。若要切换数据库实例，先将旧库备份恢复到新实例，再修改连接配置。ARTEX 启动时会迁移数据库表结构。
+Back up PostgreSQL, the application configuration, `data/`, `jwt.key`, and `skills/`, or their configured locations. Keep the same database and directories to retain task data, credentials, and installed skills. To move to a new database instance, restore the backup before changing the connection settings. ARTEX applies schema migrations at startup. If the existing installation still uses JSON configuration, [convert it to TOML](#legacy-configuration-migration) before restarting.
 
 ```bash
 ./update.sh
-# To fast-forward from the configured Git upstream before building:
+# Fast-forward from the configured Git upstream before building.
 ./update.sh --pull
 ```
 
-以上两条命令任选其一。默认只编译当前工作树。仅在明确指定 `--pull` 时，脚本才从已配置的 Git 上游快进更新源码。仅运行后端的部署可同时传入 `--backend-only`。编译失败时保留上次构建产物。编译成功后，待任务完成，停止当前进程并用原参数再次运行 `start.sh`。由系统服务托管时，通过该服务管理器手动重启。
+Choose one of the two commands. By default, the script builds the current worktree. `--pull` first fast-forwards from the configured Git upstream. For a backend-only deployment, also pass `--backend-only`. A failed build leaves the previous executable in place. After a successful build, let running tasks finish, stop the current process, and start it again with the original arguments. For a managed installation, restart the service through its service manager.
 
 ---
 
-## 配置
+## Configuration
+
+ARTEX uses TOML for application configuration. Export runtime overrides in the ARTEX process environment. npm, TypeScript, Biome, and shadcn use their own JSON manifests, Next.js and PostCSS use JavaScript modules, and GitHub Actions uses YAML.
 
 ```toml
 [database]
@@ -117,39 +82,34 @@ ssl_mode = "disable"
 directory = ""
 ```
 
-`ARTEX_CONFIG` 优先。未指定时，先查工作目录，再查可执行文件目录，每个目录优先使用 `config.toml`，并兼容旧的 `config.json`。TOML 使用已定义的配置键，未知键和解析错误会使启动失败。
+`ARTEX_CONFIG` takes precedence. Otherwise, ARTEX looks for `config.toml` in the working directory first and the executable directory second. If the selected location contains only a legacy `config.json`, ARTEX stops and requests migration. It also rejects JSON selected through `ARTEX_CONFIG`. Unknown TOML keys and parse errors stop startup.
 
-`ARTEX_PG_DSN` 优先于 `[database]`。表中可用 `dsn` 指定完整连接串，或填写分字段。分字段省略 `host`、`port` 和 `ssl_mode` 时，默认分别为 `127.0.0.1`、`5432` 和 `disable`。`ARTEX_SKILL_DIR` 优先于 `[skills].directory`。留空时使用可执行文件同级的 `skills/`，相对路径从工作目录解析。
+`ARTEX_PG_DSN` overrides `[database]`. Within the table, you can set `dsn` to a complete connection string or supply the individual connection fields. The component defaults are `127.0.0.1` for `host`, `5432` for `port`, and `disable` for `ssl_mode`. `ARTEX_SKILL_DIR` overrides `[skills].directory`. An empty directory defaults to `skills/` beside the executable. Relative paths resolve from the working directory.
 
-### 迁移旧配置
+### Legacy configuration migration
 
-先构建本地程序，然后将旧配置转换为同目录、同名主文件的 TOML 文件。
+Build the local executable, then convert the legacy file. The output uses the same base name with a `.toml` extension in the same directory.
 
 ```bash
 ./build.sh --backend-only
 ./artex -migrate-config config.json
 ```
 
-迁移保留数据库连接和 Skill 目录配置，创建仅当前用户可读写的 TOML 文件，并保留原 JSON。已有目标文件时会拒绝覆盖。迁移后的文件包含原配置中的凭据，请用同样的权限保护。若已设置 `ARTEX_CONFIG`，将其改为指向新的 TOML 文件。已安装并构建的部署可用 `./reset-password.sh` 重置管理员密码，脚本使用与服务相同的配置解析。
+Migration preserves database connection details and the skill directory. It writes an owner-readable and owner-writable TOML file, retains the original JSON, and refuses to overwrite an existing destination. The new file contains the original credentials, so protect both files. Update `ARTEX_CONFIG` if you set it explicitly. In an already built installation, `./reset-password.sh` resets the administrator password using the application's configuration resolver.
 
-### 运行选项
+### Runtime options
 
-**LLM**：`export ANTHROPIC_API_KEY=sk-...`（或 `OPENAI_API_KEY`），也可在 UI 的「LLM 配置」页填写。
-可选：`ARTEX_LLM_PROVIDER` / `ARTEX_LLM_MODEL` / `ARTEX_LLM_BASE_URL` / `ARTEX_LLM_PROXY`。
+- **LLM providers.** Enter credentials on the LLM Configuration page or set `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`. Optional overrides include `ARTEX_LLM_PROVIDER`, `ARTEX_LLM_MODEL`, `ARTEX_LLM_BASE_URL`, and `ARTEX_LLM_PROXY`.
+- **Concurrency.** System Settings controls the number of workers per task. The default is three.
+- **Listen addresses.** For example, run `./start.sh -addr 127.0.0.1:8787 -proxy 127.0.0.1:8788`. `-addr` sets the frontend and API address, which defaults to `:8787`. `-proxy` sets the traffic recording proxy address, which defaults to `127.0.0.1:8788`. An empty proxy address disables it. The startup script forwards these arguments to `artex`.
+- **Remote MCP servers.** System Settings supports `http` for Streamable HTTP and `sse` for legacy SSE. A legacy SSE URL commonly ends in `/sse`. The server announces its JSON-RPC endpoint on the event stream. Configure request headers such as `Authorization=Bearer <token>` for trusted MCP servers.
+- **Telegram notifications.** Configure the bot token, chat ID, and optional Bot API URL on the Notifications page. Each destination has its own filters, rate limits, and immediate or digest delivery mode. Changing the Bot API URL requires re-entering the bot token. Deliveries connect directly to the Bot API and bypass HTTP proxy environment variables. A custom Bot API URL may contain a path prefix. Enter credentials separately and keep user information, query strings, and fragments out of the URL. Records for retired notification channels remain in PostgreSQL. ARTEX hides them from the notification interface and stops delivering to those destinations.
 
-**并发**：每个任务的 work agent 数在「系统设置」里配置（默认 3）。
+### HTTPS reverse proxy
 
-**常用参数** `./start.sh -addr 127.0.0.1:8787 -proxy 127.0.0.1:8788`。`-addr` 设置前端和 API 监听地址（默认 `:8787`），`-proxy` 设置流量录制代理地址（默认 `127.0.0.1:8788`，设为空可停用）。启动脚本会将参数传给 `artex`。
+Run ARTEX with `-addr 127.0.0.1:8787` and expose port 443 through a reverse proxy on the same host. The frontend, API, and SSE streams share the backend's port. The frontend uses the page's origin for activity streams by default.
 
-**远程 MCP** 可在系统设置中选择 `http`（Streamable HTTP）或 `sse`（旧版 SSE）。旧版 SSE 的 URL 通常以 `/sse` 结尾，服务在事件流中公布接收 JSON-RPC 的地址。可为可信 MCP 服务配置请求头，例如 `Authorization=Bearer <token>`。
-
-**Telegram 通知** 在「通知推送」中配置 Bot Token、Chat ID 和可选的 Bot API 地址。每个目的地保留独立的过滤、限流以及实时或汇总投递设置。更改 Bot API 地址时需重新填写 Bot Token。投递直连 Bot API，绕过环境变量中的 HTTP 代理。自定义 Bot API 地址可含路径前缀，其凭据单独填写，地址本身不含用户信息、查询参数或片段。旧版其他渠道的记录保留在 PostgreSQL 中，升级后停止投递并从通知界面隐藏。
-
-### 反向代理部署（HTTPS / 只开放 443）
-
-用 `-addr 127.0.0.1:8787` 启动 ARTEX，由同一台主机的反向代理对外提供 HTTPS。前端与 API/SSE 共用该后端端口，实时活动流默认使用页面的同源地址。
-
-SSE 是长连接 + 持续推送，反代**必须关闭缓冲**，否则浏览器能连上却收不到事件（表现为活动流一直转圈）。Nginx 示例：
+Keep reverse proxy buffering disabled for SSE so the browser receives events as they arrive. The Nginx configuration below illustrates the required settings.
 
 ```nginx
 server {
@@ -172,34 +132,32 @@ server {
 }
 ```
 
-> 当 SSE 使用不同来源（如独立子域）时，在 `next build` 前设置 `NEXT_PUBLIC_SSE_BASE`。该值会写入静态包。
+If SSE uses a different origin, such as a dedicated subdomain, set `NEXT_PUBLIC_SSE_BASE` before running `next build`. The build embeds this value in the static frontend.
 
 ---
 
+## Development
 
+### Manual vulnerability retesting
 
-## 开发
+Use the Retest tab in a task to browse its findings, review previous conclusions and evidence, and start manual retests. The tab remains open while a progress icon and retest status show the run. A confirmed fix updates the finding's status.
 
-### 手动漏洞复测
+To start from another view, choose Retest in the findings list or Start Retest in the finding's detail view. Supply the fix version, testing conditions, or constraints if needed. ARTEX creates a dedicated retest agent session while keeping the current page open. The flat list, task grouping, and asset view all offer this action. Open the running session to see its progress. The Retest action becomes available again when the session finishes. Retests run independently of the original scan. The outcomes are still reproducible, fixed, and inconclusive. Each retest's conclusion, evidence, and session link stay with the finding.
 
-任务详情的「复测」页签可分页选择本任务的漏洞、查看历次结论和证据，并手动发起复测。启动后保留当前页签，显示转圈图标和「复测中」；确认修复后同步更新漏洞状态。
+On first startup, the current backend seeds an editable retest agent named `retester`. Configure its prompt, model, run budget, and tools in Agent Management. It uses its assigned LLM or falls back to the active global provider. A completed retest with a fixed outcome changes the finding's status to fixed. All other outcomes preserve the existing status. The original evidence and report are retained. You can also mark a finding fixed through the status menu. ARTEX reuses an active retest session for the same finding. You can start another after the session stops, fails, or the service restarts.
 
-在漏洞列表每行操作区点击「复测」，或在漏洞详情的「漏洞复测」区域点击「发起复测」，填写可选的修复版本、测试条件或限制，系统会创建独立的复测 Agent 会话，启动后保留当前页面。列表的平铺、按任务分组和资产视图均支持该入口；复测运行时显示转圈图标和「复测中」，需要查看时点击进入对应会话，结束后恢复「复测」。复测无需重新启动原扫描任务，结论分为「仍可复现」「已修复」「无法确认」，每次的结论、证据和会话链接保存在漏洞详情中。
+Retest history is available in finding details and sessions. Vulnerability report exports and task archives currently omit this history. Traffic captures require a separate association. Demo mode displays clearly labeled mock records.
 
-新版后端首次启动会预置可编辑的「漏洞复测」（`retester`）Agent，可在 Agent 管理中配置提示词、LLM、运行预算和工具。默认使用其绑定的 LLM，未绑定则使用全局激活配置。复测会话成功完成且结论为「已修复」时，系统自动将漏洞处置状态改为「已修复」；执行中、失败、停止或其他结论保留原状态。原始证据和报告始终保留。也可在状态下拉菜单中手动选择「已修复」。同一漏洞正在复测时复用已有会话，停止、失败或服务重启后可重新发起。
+### Local development and testing
 
-本版历史记录通过漏洞详情和会话查看，暂未纳入漏洞报告导出或任务归档包，也未自动关联流量包。演示模式只生成明确标注的模拟记录，不请求真实目标。
-
-### 本地运行与测试
-
-配置好开发用 PostgreSQL 后，在项目根目录运行以下命令。打开 `http://127.0.0.1:5173` 使用带热更新的前端。`/api` 由开发服务器代理到本机后端。
+Configure a development PostgreSQL database, then run the following from the project root. Open `http://127.0.0.1:5173` to use the frontend with hot reload. The development server proxies `/api` to the local backend.
 
 ```bash
 (cd web && npm ci)
 ./dev.sh
 ```
 
-开发进程使用本地回环地址，后端和流量代理分别监听 8787 和 8788。只启动后端可运行 `go run ./cmd/artex -addr 127.0.0.1:8787`。无需后端的本地模拟预览可运行 `cd web && NEXT_PUBLIC_MOCK=1 npm run dev -- --hostname 127.0.0.1`。
+The development backend listens on loopback port 8787 and the traffic proxy on loopback port 8788. To run just the backend, use `go run ./cmd/artex -addr 127.0.0.1:8787`. For a local frontend preview with mock data, use `cd web && NEXT_PUBLIC_MOCK=1 npm run dev -- --hostname 127.0.0.1`.
 
 ```bash
 go test ./...
@@ -207,41 +165,43 @@ go vet ./...
 (cd web && npm run build:static)
 ```
 
-运行完整 Go 测试前，将 `ARTEX_PG_DSN` 指向专用测试数据库。部分测试要求数据库可用，并会写入该库。静态导出构建包含 TypeScript 检查。
+Point `ARTEX_PG_DSN` at a dedicated test database before running the full Go suite. Some tests require PostgreSQL and write to that database. The static frontend build includes TypeScript checks.
+
+The opt-in `TestLiveContextReview` reads a private TOML file selected by `ARTEX_REVIEW_LIVE_CONFIG`. Its `[judge]` table accepts `base_url`, `api_key`, and `model`. Keep this file outside the checkout.
 
 ---
 
-## 系统技术架构
+## Architecture
 
-ARTEX 是一套 **LLM 多 agent 驱动的自主渗透系统**：Go 单体后端（内嵌 Next.js 前端）+ PostgreSQL，agent 能力由 [`norma`](https://github.com/Autumn-27/norma) SDK 提供（`agentcore` / `tool` / `permission` / `harness` / `memory` / `transcript`）。核心是**双图架构**，以及围绕它的两条自主性机制：**worker 间过程级信息交换**与 **planner 多轮共享 todolist 稳定攻击链路**。
+ARTEX combines a Go monolith, an embedded Next.js frontend, and PostgreSQL. Its LLM-driven agents use the [Norma SDK](https://github.com/Autumn-27/norma) for agent execution, tools, permissions, safeguards, memory, and transcripts. Two graphs underpin the architecture. Workers can share observations from their execution histories, and the planner retains a task-level to-do list across rounds.
 
-### 总体分层
+### System layers
 
 ```mermaid
 flowchart TB
-  subgraph FE["前端 Next.js（go:embed 内嵌单二进制）"]
-    UI["仪表盘 · 任务 · 资产 · 覆盖图 · 流量 · 工作空间 · 系统配置"]
+  subgraph FE["Next.js frontend embedded with go:embed"]
+    UI["Dashboard · tasks · assets · coverage graph · traffic · workspace · settings"]
   end
-  subgraph SRV["server（Go net/http）"]
-    API["REST /api/*　JWT 鉴权　SSE"]
-    ENG["engine 调度循环"]
-    MGR["Manager　任务/引擎/store 生命周期"]
+  subgraph SRV["server · Go net/http"]
+    API["REST /api/* · JWT authentication · SSE"]
+    ENG["Engine scheduling loops"]
+    MGR["Manager · task, engine, and store lifecycle"]
   end
-  subgraph AG["agent（norma SDK）"]
-    GO["goals　目标分解 + 提取范围"]
-    PL["planner　规划者（唯一意图生成者）"]
-    WK["worker　执行者 ×N"]
-    MA["mainagent　人在环路"]
+  subgraph AG["Agents · Norma SDK"]
+    GO["Goals · decomposition and scope extraction"]
+    PL["Planner · creates intents"]
+    WK["Workers · execute intents"]
+    MA["Main agent · human-in-the-loop chat"]
   end
   subgraph DB["PostgreSQL"]
-    AGRAPH["资产图　assets / companies / task_scope"]
-    EGRAPH["探索图　exploration_nodes / anchors / activity"]
+    AGRAPH["Asset graph · assets / companies / task_scope"]
+    EGRAPH["Exploration graph · exploration_nodes / anchors / activity"]
   end
-  subgraph SUB["支撑子系统"]
-    PROXY["流量记录代理　MITM + CA 留痕"]
-    GUARD["guard / intercept　工具审批门"]
-    NOTIFY["notify　Telegram 投递"]
-    EXT["MCP · skills · memory · report"]
+  subgraph SUB["Supporting subsystems"]
+    PROXY["Traffic recording proxy · interception and CA"]
+    GUARD["guard / intercept · tool approvals"]
+    NOTIFY["notify · Telegram delivery"]
+    EXT["MCP · skills · memory · reports"]
   end
 
   UI -->|HTTP| API
@@ -254,46 +214,44 @@ flowchart TB
   WK --> DB
   MA --> DB
   GO --> DB
-  WK -->|"Bash / HTTP 全程留痕"| PROXY
+  WK -->|Recorded Bash or HTTP traffic| PROXY
   WK --> GUARD
-  DB -->|通知队列| NOTIFY
+  DB -->|Notification queue| NOTIFY
   PL -.-> EXT
   WK -.-> EXT
   MA -.-> EXT
 ```
 
-| 层 | 职责 |
+| Layer | Responsibility |
 | --- | --- |
-| **前端** | Next.js 静态导出，`go:embed` 内嵌进单二进制；可视化任务/资产/探索链路/覆盖图，人在环路对话 |
-| **server** | `net/http` 路由 + JWT 鉴权 + SSE；`Manager` 托管任务、引擎、DB store 的生命周期 |
-| **engine** | 每任务一个 `plannerLoop` + N 个 worker goroutine；意图领取、超时/暂停/drain |
-| **agent** | goals / planner / worker / mainagent，`ToolSet` 把双图暴露成 LLM 工具 |
-| **db** | 双图的 Postgres 落地（pgx）；schema 随 `go:embed` 每次启动幂等建表 |
-| **支撑** | 记录型 MITM 代理、审批门、Telegram 通知、MCP、技能与报告 |
+| **Frontend** | A Next.js static export embedded in the executable with `go:embed`. Displays tasks, assets, exploration paths, coverage, and human-in-the-loop chat. |
+| **Server** | Handles `net/http` routing, JWT authentication, and SSE. The `Manager` owns task, engine, and store lifecycles. |
+| **Engine** | Runs one `plannerLoop` and multiple worker goroutines per task. Coordinates intent claims, timeouts, pauses, and draining. |
+| **Agents** | Goal, planner, worker, and main-agent roles. `ToolSet` provides LLM tools for interacting with the two graphs. |
+| **Persistence** | Stores both graphs in PostgreSQL through pgx. An embedded schema runs idempotently at startup. |
+| **Supporting services** | Traffic recording, approvals, Telegram notifications, MCP, skills, and reports. |
 
-### 双图架构：探索图 + 资产图
+### Asset and exploration graphs
 
-系统把「**目标是什么**」和「**测到了什么程度**」拆成两张相互独立、又通过锚点相连的图：
-
-- **资产图（Asset Graph，全局共享）**：跨任务同一份的资产真值库。节点为 `root_domain / subdomain / ip / service / app / endpoint`，归属公司；域名→子域→服务→端点的父子关系与去重 key 全部由程序计算，agent 只提交原始信息。
-- **探索图（Exploration Graph，每任务独立）**：一次任务的“思考与推进”过程。节点为 `goal（目标）/ intent（意图）/ fact（事实）/ finding（漏洞）/ hint（提示）`，靠 `spawns / derived_from / yields / proves` 等边连成**血缘链**，回答“哪个方向派生自哪些事实、产出了什么”。
-- **两图靠锚点相连**：`exploration_anchors(node_id, asset_id)` 把意图/事实/漏洞锚定到具体资产上——于是既能从“探索方向”看它打的是哪些资产，也能从“某个资产”反查它在本任务被哪些意图测过、得出过哪些事实。这也支撑了**资产测试覆盖度**与**资产覆盖图**（范围内资产 + 已测高亮）。
+- **Asset graph.** A shared inventory across tasks. Nodes represent root domains, subdomains, IP addresses, services, applications, and endpoints, with organization associations. ARTEX derives parent-child relationships and deduplication keys from the asset records agents submit.
+- **Exploration graph.** A record of each task's progress. It contains goals, intents, facts, findings, and hints. Edges such as `spawns`, `derived_from`, `yields`, and `proves` preserve the relationship between observations and conclusions.
+- **Anchors.** `exploration_anchors(node_id, asset_id)` connects intents, facts, and findings to assets. This lets the UI show which assets an intent covered and retrieve the observations linked to a particular asset in a task. The same links support scope-aware coverage reporting.
 
 ```mermaid
 flowchart LR
-  subgraph EG["探索图（每任务独立 · 推进链）"]
+  subgraph EG["Exploration graph · per task"]
     direction TB
-    G["goal 目标"]
-    I1["intent 意图 A"]
-    F1["fact 事实"]
-    I2["intent 意图 B"]
-    FD["finding 漏洞"]
+    G["Goal"]
+    I1["Intent A"]
+    F1["Fact"]
+    I2["Intent B"]
+    FD["Finding"]
     G -->|spawns| I1
     I1 -->|yields| F1
     F1 -->|derived_from| I2
     I2 -->|proves| FD
   end
-  subgraph AG["资产图（全局共享 · 真值库）"]
+  subgraph AG["Asset graph · shared inventory"]
     direction TB
     RD["root_domain"]
     SD["subdomain"]
@@ -307,82 +265,71 @@ flowchart LR
   FD -. anchor .-> EP
 ```
 
-> 分工：**planner** 读探索图态势、判目标、只在有未覆盖的新方向时派**意图**进 frontier；**worker** 领**一条意图**、用真实工具执行、把新资产/事实/漏洞写回两图后即停。资产图是共享事实，探索图是每任务的推进链。
+The planner reads the task's graph and dispatches an intent when there is an uncovered direction to investigate. Each worker claims one intent, records any new assets, facts, and findings, then finishes that unit of work. The asset graph provides shared context while the exploration graph records progress for each task.
 
-### 引擎与意图生命周期（一次探索的闭环）
+### Engine and intent lifecycle
 
-引擎是**事件驱动**的闭环：图一变就唤醒 planner，planner 派意图，worker 领意图执行并写回，写回又触发下一轮——直到目标被证明（`prove_goal`）。
+The engine is event-driven. Graph changes wake the planner, which can add intents to the frontier. Workers claim them and persist their results. Those writes can trigger another round. A goal can be closed through `prove_goal`.
 
 ```mermaid
 sequenceDiagram
   autonumber
-  participant EV as 图变更 debounce
-  participant P as planner
-  participant FR as frontier 意图队列
-  participant W as worker
-  participant PX as 记录代理
-  participant DB as 双图 + activity
+  participant EV as Debounced graph changes
+  participant P as Planner
+  participant FR as Intent frontier
+  participant W as Worker
+  participant PX as Recording proxy
+  participant DB as Graphs and activity
 
-  EV-->>P: 唤醒
-  P->>DB: 读态势(graph_overview 预取 + coverage/scope)
-  P->>FR: 派 0..N 个意图(带 asset_ids)
-  Note over P,FR: 大多数唤醒派 0 个——无新方向即结束
-  W->>FR: claimNext 领一条意图
-  W->>DB: 取意图 asset_ids 的原始资产作为初始信息
-  W->>PX: 真实工具执行(Kali / Bash / HTTP)
-  PX-->>W: 响应(全程留痕 + CA 验证)
-  W->>DB: 写回 fact / asset / finding + 每步 activity
-  DB-->>EV: 图变更
-  EV-->>P: 再次唤醒(闭环)
+  EV-->>P: Wake planner
+  P->>DB: Read graph overview, coverage, and scope
+  P->>FR: Queue intents with asset IDs as needed
+  Note over P,FR: Most wake-ups find no new direction and queue nothing
+  W->>FR: Claim one intent
+  W->>DB: Load the referenced assets
+  W->>PX: Run tools through configured interfaces
+  PX-->>W: Return responses and record captured traffic
+  W->>DB: Write facts, assets, findings, and activity
+  DB-->>EV: Signal graph change
 ```
 
-### worker 间的过程级信息交换
+### Sharing observations between workers
 
-一次深入的探索里，很多有价值的观察（某个报错、某段响应、某个隐藏参数）出现在一个 worker 的**执行过程**中，却未必被写成正式 fact。为避免重复劳动、让链路上的 worker 能站在彼此的肩膀上，worker 具备**跨 work 检索过程**的能力：
-
-- `search_all_worker_traces(q)`：在**本任务其他 work 的执行过程**里按关键字检索（自动排除自己这条意图的步骤），命中项带 `intent_id`；
-- `list_worker_traces` / `get_worker_trace(intent_id, step_ids=[…])`：先看有哪些 work 跑过，再取某个 work 具体几步的完整内容做细节交换。
-
-这样即便探索图上还没有对应的 fact，后续 worker 也能复用他人过程中的观察——**信息在 worker 之间以“执行过程”为粒度流动**，而边界不变（每个 worker 仍只做自己领到的那条意图）。
+Useful observations can appear in a worker's execution history before becoming formal facts. Workers can look up observations from other intents in the same task to avoid repeating work. `search_all_worker_traces(q)` searches by keyword, excludes the current intent, and includes the source `intent_id` in matches. `list_worker_traces` lists available traces, and `get_worker_trace(intent_id, step_ids=[…])` fetches specific steps. Each worker stays assigned to its own intent.
 
 ```mermaid
 flowchart LR
-  WA["worker A（意图 #12）"] -->|"每步 activity"| ACT[("探索图 · activity 过程库")]
-  WB["worker B（意图 #34）"] -->|"每步 activity"| ACT
-  WC["worker C（意图 #56）"] ==>|"1) search_all_worker_traces(q)"| ACT
-  ACT ==>|"2) 命中 A/B 的步骤（排除自己）"| WC
-  WC ==>|"3) get_worker_trace(id, step_ids)"| ACT
-  ACT ==>|"4) 返回完整过程内容"| WC
+  WA["Worker A · intent 12"] -->|Records activity| ACT[("Exploration activity")]
+  WB["Worker B · intent 34"] -->|Records activity| ACT
+  WC["Worker C · intent 56"] ==>|Search traces| ACT
+  ACT ==>|Matching steps from A and B| WC
+  WC ==>|Request selected steps| ACT
+  ACT ==>|Full step details| WC
 ```
 
-### planner 多轮共享 todolist → 稳定的攻击链路
+### Task-level planning across rounds
 
-真实攻击链往往是**有前后依赖的多步序列**（如：发现注入点 → 拿到凭据 → 横向 → 提权），一次性把这些并行派下去只会乱套。planner 因此持有一份**按任务保留、跨唤醒共享的规划待办（todolist）**：
-
-- planner 是事件驱动的——图一变就被唤醒，但**每次唤醒是全新会话**；共享的 todolist 让它把一条串行利用链**记录一次**、然后在后续多轮里**按依赖逐步派意图**，而不是把整条链在一轮里全部前置展开；
-- 每轮只对「前置步骤已完成、其依赖的 fact 已存在」的下一步派意图，并随进展更新清单（把已被 fact 满足的步骤标完成）。
+Some tasks contain steps whose prerequisites must be satisfied in order. Each planner wake-up starts a new session, and a task-level to-do list carries the plan across sessions. The planner can use recorded facts to mark completed work and decide which pending step is ready. This keeps dependency tracking in the task state.
 
 ```mermaid
 flowchart TB
-  subgraph TODO["共享 todolist（按任务保留 · 跨唤醒常驻）"]
+  subgraph TODO["Task-level to-do list"]
     direction LR
-    T1["1 注入点　[已完成]"]
-    T2["2 取凭据　[进行中]"]
-    T3["3 横向　[待前置]"]
-    T4["4 提权　[待前置]"]
-    T1 -.前置满足.-> T2 -.-> T3 -.-> T4
+    T1["Step 1 · complete"]
+    T2["Step 2 · in progress"]
+    T3["Step 3 · awaiting prerequisite"]
+    T4["Step 4 · awaiting prerequisite"]
+    T1 -. Prerequisite met .-> T2 -.-> T3 -.-> T4
   end
-  R1["第 1 轮唤醒　派意图①"] --> T1
-  R2["第 2 轮（①产出 fact）　派意图②"] --> T2
-  R3["第 3 轮（②产出 fact）　派意图③"] --> T3
+  R1["First round"] --> T1
+  R2["Second round"] --> T2
+  R3["Third round, after step 2 is recorded"] --> T3
 ```
-
-于是攻击链在“事件驱动 + 无状态会话”的环境下依然**稳定推进、不重复、不错序**——这是 ARTEX 能自主走完多步利用链的关键。
 
 ---
 
-## 参考
+## References and licensing
 
-https://github.com/oritera/Cairn
+- [Cairn](https://github.com/oritera/Cairn)
 
-项目采用 [AGPL-3.0](LICENSE)。前端所含 MIT 授权材料及版权声明见 [web/LICENSE](web/LICENSE)。
+ARTEX is licensed under [AGPL-3.0](LICENSE). The frontend's MIT-licensed materials and copyright notices are listed in [web/LICENSE](web/LICENSE).

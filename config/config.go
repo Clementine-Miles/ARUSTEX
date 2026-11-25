@@ -49,7 +49,6 @@ type fileConfig struct {
 type Settings struct {
 	Path   string
 	Exists bool
-	Legacy bool
 
 	file             fileConfig
 	postgresOverride string
@@ -95,8 +94,9 @@ func isGoRunDir(dir string) bool {
 	return false
 }
 
-// Read checks ARTEX_CONFIG first, then looks in the working directory and beside
-// the executable. Within each directory TOML takes precedence over legacy JSON.
+// Read checks ARTEX_CONFIG first, then looks for config.toml in the working
+// directory and beside the executable. A legacy file in a selected location
+// requires migration so its settings are never silently skipped.
 func Read() (Settings, error) {
 	return ReadPath("")
 }
@@ -149,22 +149,18 @@ func (s Settings) load(path string) (Settings, error) {
 	if err != nil {
 		return Settings{}, fmt.Errorf("read configuration: %w", err)
 	}
-	s.Path = path
-	s.Exists = true
-	ext := strings.ToLower(filepath.Ext(path))
-	// Older ARTEX installations could point ARTEX_CONFIG at any JSON filename.
-	s.Legacy = ext == ".json" || (ext != ".toml" && bytes.HasPrefix(bytes.TrimSpace(data), []byte("{")))
-	if s.Legacy {
-		s.file, err = decodeLegacy(data)
-	} else {
-		s.file, err = decodeTOML(data)
+	if strings.EqualFold(filepath.Ext(path), ".json") || bytes.HasPrefix(bytes.TrimSpace(data), []byte("{")) {
+		return Settings{}, fmt.Errorf("legacy JSON configuration %q: convert it with artex -migrate-config and use the resulting TOML file", path)
 	}
+	s.file, err = decodeTOML(data)
 	if err == nil {
 		err = s.file.Database.validate()
 	}
 	if err != nil {
 		return Settings{}, fmt.Errorf("configuration %q: %w", path, err)
 	}
+	s.Path = path
+	s.Exists = true
 	return s, nil
 }
 

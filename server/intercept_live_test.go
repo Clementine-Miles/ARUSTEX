@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/BurntSushi/toml"
+
 	"github.com/Autumn-27/artex/agent"
 	"github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/artex/intercept"
@@ -19,21 +21,18 @@ import (
 func TestLiveContextReview(t *testing.T) {
 	path := os.Getenv("ARTEX_REVIEW_LIVE_CONFIG")
 	if path == "" {
-		t.Skip("set ARTEX_REVIEW_LIVE_CONFIG to an external private model config")
+		t.Skip("set ARTEX_REVIEW_LIVE_CONFIG to an external private TOML file")
 	}
 	var cfg struct {
 		Judge struct {
-			BaseURL string `json:"base_url"`
-			APIKey  string `json:"api_key"`
-			Model   string `json:"model"`
-		} `json:"judge"`
+			BaseURL string `toml:"base_url"`
+			APIKey  string `toml:"api_key"`
+			Model   string `toml:"model"`
+		} `toml:"judge"`
 	}
-	b, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal("cannot read live model config")
-	}
-	if json.Unmarshal(b, &cfg) != nil || cfg.Judge.APIKey == "" {
-		t.Fatal("invalid live model config")
+	meta, err := toml.DecodeFile(path, &cfg)
+	if err != nil || len(meta.Undecoded()) != 0 || cfg.Judge.APIKey == "" {
+		t.Fatal("invalid live model TOML configuration; set api_key in the [judge] table")
 	}
 	provider, err := (agent.Config{Format: llm.FormatOpenAI, BaseURL: cfg.Judge.BaseURL, APIKey: cfg.Judge.APIKey, Model: cfg.Judge.Model}).NewProvider()
 	if err != nil {

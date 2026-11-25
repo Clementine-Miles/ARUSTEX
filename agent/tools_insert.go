@@ -646,7 +646,7 @@ func (t *ToolSet) WorkerTools() []actool.CoreTool {
 		// duplicates.
 		t.listFindings(),
 		t.addFinding(), t.recordFact(),
-		// asset management (handlers guard nil store internally)。
+		// Asset handlers check for a nil store.
 		// Reserve company scope changes for planning, the main Agent, and Auto. Workers execute intents.
 		t.insertAssets(), t.listAssets(),
 		// Workers can reuse prior observations. search_all_worker_traces finds matching steps without an
