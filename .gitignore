@@ -3,6 +3,7 @@
 
 # local configuration and secrets
 config.toml
+/config.rust.toml
 *.key
 .env
 

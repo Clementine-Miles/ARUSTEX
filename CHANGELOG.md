@@ -417,7 +417,7 @@
 
 ### 部署与更新
 
-- 此版本曾引入应用内更新和守护启动。当前部署统一采用源码构建，详见 [更新升级](README.md#更新升级)。
+- 此版本曾引入应用内更新和守护启动。当前部署统一采用源码构建，详见 [更新升级](https://github.com/Clementine-Miles/ARUSTEX/blob/3d0caa9402f76d3be5dc03eca796dfb0afe088ea/README.zh-CN.md#更新升级)。
 
 ### 依赖
 
@@ -836,7 +836,7 @@
 
 ### 构建
 
-- 此版本曾加入跨平台构建和分发流程，当前部署支持范围见 [安装](README.md#安装)。
+- 此版本曾加入跨平台构建和分发流程，当前部署支持范围见 [安装](https://github.com/Clementine-Miles/ARUSTEX/blob/3d0caa9402f76d3be5dc03eca796dfb0afe088ea/README.zh-CN.md#安装)。
 
 ### 贡献者
 
