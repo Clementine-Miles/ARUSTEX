@@ -1,19 +1,90 @@
-# Copy this file to config.toml or set ARTEX_CONFIG to a different path.
-# The backend reads environment overrides from its process environment.
-# Configure the LLM in the application settings or through environment variables.
+# ARUSTEX configuration.
+#
+# Search order: --config, $ARUSTEX_CONFIG, $XDG_CONFIG_HOME/arustex/config.toml,
+# /etc/arustex/config.toml. Command-line flags override environment variables,
+# which override this file. Check a file with `arustex config validate`.
+#
+# Secrets never appear here. Each secret names an environment variable (`env`) or a
+# file readable only by its owner (`file`, mode 0600).
 
 [database]
-# ARTEX_PG_DSN takes precedence. A nonempty dsn replaces all fields below.
-dsn = ""
-host = "127.0.0.1"
-port = 5432
-user = "artex"
-password = ""
-db_name = "artex"
-# Use verify-full and configure trusted certificates for remote deployments.
-ssl_mode = "disable"
+# PostgreSQL is the only datastore. The URL comes from $ARUSTEX_DATABASE_URL by
+# default; a password-less URL (e.g. peer authentication over a Unix socket) may be
+# written directly in `url` instead.
+# url = "postgres://arustex@/arustex?host=/run/postgresql"
+url_secret = { env = "ARUSTEX_DATABASE_URL" }
+max_connections = 16
+acquire_timeout_secs = 10
+statement_timeout_secs = 30
 
-[skills]
-# ARTEX_SKILL_DIR takes precedence. Empty defaults to skills/ beside the
-# executable. Relative paths resolve from the working directory.
-directory = ""
+[daemon]
+# Defaults to $XDG_RUNTIME_DIR/arustex/arustex.sock (directory 0700, socket 0600).
+# socket = "/run/user/1000/arustex/arustex.sock"
+max_clients = 32
+client_queue = 512
+event_buffer = 1024
+request_timeout_secs = 30
+
+# Model providers. Only providers listed here are ever contacted. Endpoints must use
+# https; plain http is accepted only for loopback (a local compatible server).
+#
+# [[providers]]
+# name = "primary"
+# kind = "anthropic"            # anthropic | openai_chat | openai_responses | mock
+# model = "your-model-id"
+# api_key = { env = "ARUSTEX_ANTHROPIC_API_KEY" }
+# default = true
+# timeout_secs = 120
+# max_retries = 3
+# requests_per_minute = 60
+#
+# [[providers]]
+# name = "compatible"
+# kind = "openai_chat"
+# base_url = "https://llm.internal.example/v1"
+# model = "your-model-id"
+# api_key = { file = "/home/you/.config/arustex/compatible.key" }
+
+# The deterministic mock provider works without network access.
+[[providers]]
+name = "mock"
+kind = "mock"
+model = "mock-1"
+default = true
+
+# Built-in agents: planner, worker, assistant, reviewer. Override limits per agent.
+# [[agents]]
+# key = "worker"
+# model_profile = "primary"
+# max_turns = 12
+# token_budget = 60000
+
+[scheduler]
+enabled = true
+poll_interval_ms = 1000
+lease_secs = 120
+max_concurrent_sessions = 4
+max_attempts = 3
+planner_enabled = true
+reviewer_enabled = true
+
+[limits]
+max_record_line_bytes = 1048576
+max_record_body_bytes = 524288
+max_records_per_import = 1000000
+attachment_max_bytes = 67108864
+record_retention_days = 0
+
+[telegram]
+# Disabled by default. When enabled, only task status and short summaries are sent
+# to the single chat below; imported record contents are never sent.
+enabled = false
+# bot_token = { env = "ARUSTEX_TELEGRAM_TOKEN" }
+# chat_id = 123456789
+api_base = "https://api.telegram.org"
+events = ["task_completed", "task_failed", "approval_requested"]
+min_interval_secs = 3
+max_attempts = 5
+
+[logging]
+level = "info"

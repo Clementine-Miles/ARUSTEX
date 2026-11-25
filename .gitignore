@@ -1,58 +1,19 @@
-# backend
-/data/
-*.db
-*.db-wal
-*.db-shm
-config.json
+# build output
+/target/
+
+# local configuration and secrets
 config.toml
-.artex-config-*
-scheduler_state.json
-__pycache__/
-*.pyc
-*.pyo
+/config.rust.toml
+*.key
+.env
 
-# frontend
-web/node_modules/
-web/.next/
-web/tsconfig.tsbuildinfo
-web/next-env.d.ts
-*.local
-
-# development tools
-.playwright-mcp/
-.playwright-cli/
+# editors and tools
 .idea/
 .vscode/
 *.swp
 *.swo
-
-# docs
-/docs/
+.claude/
 
 # os
 .DS_Store
 Thumbs.db
-
-# claude code local state
-.claude/
-
-# Local build output and staging directory
-/artex
-/.artex-build.*/
-/server/webui/dist/
-
-# Runtime JWT signing key
-/jwt.key
-
-# Local environment credentials
-.env
-
-# Scheduler event logs from runs or simulations
-*-events.csv
-
-# Local benchmark output
-/bench/
-
-# Rust inspection application
-/target/
-/config.rust.toml

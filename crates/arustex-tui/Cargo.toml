@@ -1,13 +1,22 @@
 [package]
 name = "arustex-tui"
+description = "Terminal interface for ARUSTEX (Ratatui/Crossterm)"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-license.workspace = true
+license-file.workspace = true
+publish.workspace = true
 
 [dependencies]
+arustex-app.workspace = true
 arustex-core.workspace = true
+chrono.workspace = true
 crossterm.workspace = true
-futures-util.workspace = true
+futures.workspace = true
 ratatui.workspace = true
+serde_json.workspace = true
 tokio.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true

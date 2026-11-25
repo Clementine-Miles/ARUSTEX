@@ -1,109 +1,191 @@
-//! Terminal client for the read-only ARUSTEX IPC contract.
+//! Terminal interface. It talks to the daemon over the local socket only; it never
+//! opens the database or any network connection itself.
 
-#![forbid(unsafe_code)]
+pub mod app;
+pub mod text;
+pub mod ui;
 
-mod app;
-mod views;
+use std::io::{self, Stdout};
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::Duration;
 
-use std::{
-    future::{Future, pending},
-    io::{self, IsTerminal},
+use arustex_app::client::{Client, ClientEvent};
+use arustex_core::CoreResult;
+use arustex_core::ipc::{Request, Response};
+use crossterm::event::{Event, EventStream};
+use crossterm::terminal::{
+    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
+use crossterm::{cursor, execute};
+use futures::StreamExt;
+use ratatui::Terminal;
+use ratatui::backend::CrosstermBackend;
+use tokio::sync::mpsc;
 
-use arustex_core::{Query, Reply};
-use crossterm::{
-    cursor::{Hide, Show},
-    event::{Event, EventStream, KeyEventKind},
-    execute,
-    terminal::{
-        EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode, size,
-    },
-};
-use futures_util::StreamExt;
-use ratatui::{Terminal, TerminalOptions, Viewport, backend::CrosstermBackend, layout::Rect};
-use tokio::signal::unix::{SignalKind, signal};
+pub use app::{App, View};
 
-use app::{Action, Browser};
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+const MAX_BACKOFF: Duration = Duration::from_secs(10);
 
-/// Runs the terminal client. The callback opens a local IPC connection for each
-/// request and must be cancellation-safe when its future is dropped.
-pub async fn run<F, Fut>(mut query: F) -> io::Result<()>
-where
-    F: FnMut(Query) -> Fut,
-    Fut: Future<Output = Result<Reply, String>>,
-{
-    let mut interrupt = signal(SignalKind::interrupt())?;
-    let mut terminate = signal(SignalKind::terminate())?;
-    let _terminal_mode = TerminalMode::enter()?;
-    let (width, height) = size()?;
-    let mut terminal = Terminal::with_options(
-        CrosstermBackend::new(io::stdout()),
-        TerminalOptions {
-            viewport: Viewport::Fixed(viewport(width, height)),
-        },
-    )?;
-    let mut events = EventStream::new();
+#[derive(Debug, Clone)]
+pub struct TuiOptions {
+    pub socket: PathBuf,
+    pub request_timeout: Duration,
+}
 
-    let mut browser = Browser::default();
-    let mut request = Some(Box::pin(query(browser.load())));
+/// Restores the terminal on drop and on panic.
+#[derive(Debug)]
+struct TerminalGuard {
+    terminal: Terminal<CrosstermBackend<Stdout>>,
+}
+
+fn restore_terminal() {
+    let _ = disable_raw_mode();
+    let _ = execute!(io::stdout(), LeaveAlternateScreen, cursor::Show);
+}
+
+impl TerminalGuard {
+    fn new() -> io::Result<Self> {
+        let previous = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            restore_terminal();
+            previous(info);
+        }));
+        enable_raw_mode()?;
+        let mut stdout = io::stdout();
+        if let Err(e) = execute!(stdout, EnterAlternateScreen, cursor::Hide) {
+            restore_terminal();
+            return Err(e);
+        }
+        let terminal =
+            Terminal::new(CrosstermBackend::new(stdout)).inspect_err(|_| restore_terminal())?;
+        Ok(Self { terminal })
+    }
+}
+
+impl Drop for TerminalGuard {
+    fn drop(&mut self) {
+        restore_terminal();
+    }
+}
+
+enum Msg {
+    Connected(Arc<Client>, mpsc::Receiver<ClientEvent>),
+    ConnectFailed(String),
+    Reply(CoreResult<Response>),
+}
+
+/// Runs the interface until the operator quits.
+pub async fn run(options: TuiOptions) -> io::Result<()> {
+    let theme = ui::Theme::from_env();
+    let mut guard = TerminalGuard::new()?;
+    let mut app = App::new();
+    let mut input = EventStream::new();
+    let (msg_tx, mut msg_rx) = mpsc::channel::<Msg>(256);
+    let mut client: Option<Arc<Client>> = None;
+    let mut events: Option<mpsc::Receiver<ClientEvent>> = None;
+    let mut backoff = Duration::from_millis(500);
+    let mut ticker = tokio::time::interval(Duration::from_millis(400));
+    let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+    let mut hup = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::hangup())?;
+
+    spawn_connect(options.clone(), msg_tx.clone(), Duration::ZERO);
+    let send = |client: &Option<Arc<Client>>, reqs: Vec<Request>, tx: &mpsc::Sender<Msg>| {
+        let Some(c) = client else { return };
+        for r in reqs {
+            let c = c.clone();
+            let tx = tx.clone();
+            tokio::spawn(async move {
+                let _ = tx.send(Msg::Reply(c.request(r).await)).await;
+            });
+        }
+    };
 
     loop {
-        terminal.draw(|frame| views::render(frame, &browser))?;
+        guard.terminal.draw(|f| ui::draw(f, &app, theme))?;
+        if app.quit {
+            break;
+        }
         tokio::select! {
-            event = events.next() => match event.transpose()? {
-                Some(Event::Key(key)) if key.kind != KeyEventKind::Release => {
-                    match browser.key(key) {
-                        Action::Quit => break,
-                        Action::Load => request = Some(Box::pin(query(browser.load()))),
-                        Action::None => {}
+            maybe = input.next() => match maybe {
+                Some(Ok(Event::Key(key))) => {
+                    let reqs = app.on_key(key);
+                    if !reqs.is_empty() && client.is_none() {
+                        app.error("not connected to the daemon");
                     }
+                    send(&client, reqs, &msg_tx);
                 }
-                Some(Event::Resize(width, height)) => terminal.resize(viewport(width, height))?,
-                Some(_) => {}
+                Some(Ok(_)) => {}
+                Some(Err(e)) => return Err(e),
                 None => break,
             },
-            result = async {
-                match request.as_mut() {
-                    Some(future) => future.await,
-                    None => pending().await,
+            ev = async {
+                match events.as_mut() {
+                    Some(rx) => rx.recv().await,
+                    None => std::future::pending().await,
                 }
-            } => {
-                request = None;
-                browser.complete(result);
+            } => match ev {
+                Some(ClientEvent::Event(e)) => {
+                    let reqs = app.on_event(e);
+                    send(&client, reqs, &msg_tx);
+                }
+                Some(ClientEvent::Resync { latest_seq }) => {
+                    let reqs = app.on_resync(latest_seq);
+                    send(&client, reqs, &msg_tx);
+                }
+                Some(ClientEvent::Disconnected) | None => {
+                    client = None;
+                    events = None;
+                    app.on_disconnected();
+                    spawn_connect(options.clone(), msg_tx.clone(), backoff);
+                }
             },
-            _ = interrupt.recv() => break,
-            _ = terminate.recv() => break,
+            Some(msg) = msg_rx.recv() => match msg {
+                Msg::Connected(c, rx) => {
+                    backoff = Duration::from_millis(500);
+                    let reqs = app.on_connected(c.server.clone());
+                    client = Some(c);
+                    events = Some(rx);
+                    send(&client, reqs, &msg_tx);
+                }
+                Msg::ConnectFailed(e) => {
+                    app.connected = false;
+                    app.error(format!("{e}; retrying in {}s", backoff.as_secs().max(1)));
+                    spawn_connect(options.clone(), msg_tx.clone(), backoff);
+                    backoff = (backoff * 2).min(MAX_BACKOFF);
+                }
+                Msg::Reply(Ok(resp)) => {
+                    let reqs = app.on_response(resp);
+                    send(&client, reqs, &msg_tx);
+                }
+                Msg::Reply(Err(e)) => app.error(e.to_string()),
+            },
+            _ = ticker.tick() => {
+                if client.is_some() {
+                    let reqs = app.take_dirty();
+                    send(&client, reqs, &msg_tx);
+                }
+            }
+            _ = term.recv() => break,
+            _ = hup.recv() => break,
         }
     }
-
+    drop(guard);
     Ok(())
 }
 
-fn viewport(width: u16, height: u16) -> Rect {
-    // The terminal controls its reported dimensions. Cap the backing buffers.
-    Rect::new(0, 0, width.min(300), height.min(120))
+fn spawn_connect(options: TuiOptions, tx: mpsc::Sender<Msg>, delay: Duration) {
+    tokio::spawn(async move {
+        tokio::time::sleep(delay).await;
+        let timeout = options.request_timeout.max(CONNECT_TIMEOUT);
+        let msg = match Client::connect(&options.socket, "arustex-tui", timeout, 2048).await {
+            Ok((c, rx)) => Msg::Connected(Arc::new(c), rx),
+            Err(e) => Msg::ConnectFailed(e.to_string()),
+        };
+        let _ = tx.send(msg).await;
+    });
 }
 
-struct TerminalMode;
-
-impl TerminalMode {
-    fn enter() -> io::Result<Self> {
-        if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "run the TUI in an interactive terminal",
-            ));
-        }
-        enable_raw_mode()?;
-        let mode = Self;
-        execute!(io::stdout(), EnterAlternateScreen, Hide)?;
-        Ok(mode)
-    }
-}
-
-impl Drop for TerminalMode {
-    fn drop(&mut self) {
-        let _ = disable_raw_mode();
-        let _ = execute!(io::stdout(), LeaveAlternateScreen, Show);
-    }
-}
+#[cfg(test)]
+mod tests;

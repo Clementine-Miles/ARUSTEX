@@ -1,12 +1,21 @@
 [package]
 name = "arustex-core"
+description = "Domain types, events, IPC contracts and shared interfaces for ARUSTEX"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-license.workspace = true
+license-file.workspace = true
+publish.workspace = true
 
 [dependencies]
+async-trait.workspace = true
+chrono.workspace = true
+hex.workspace = true
 serde.workspace = true
-
-[dev-dependencies]
 serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+
+[lints]
+workspace = true

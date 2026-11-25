@@ -4,6 +4,16 @@
 
 ## [Unreleased]
 
+### Rust 重写
+
+- 以 Rust 2024 Cargo 工作区重写为 Linux 原生单一可执行文件 `arustex`：守护进程 + Ratatui 终端界面，经 Unix 套接字通信（校验对端 uid、版本化消息、事件序号、断线重连与快照恢复）。
+- PostgreSQL 为唯一存储，版本化 SQL 迁移；TOML 配置，密钥只取自环境变量或仅属主可读的文件。
+- 范围收窄为对操作者导入记录的模型辅助审阅：静态操作注册表（9 个操作）+ 默认拒绝的能力策略；不再包含主动探测、流量拦截、凭据收集、命令执行、MCP、技能等旧功能，也不迁移对应实现与提示词。
+- 报告改为带来源信息的 `arustex.report.v1`；通知仅保留 Telegram，默认关闭。
+- 旧版数据通过白名单只读导入（`arustex import legacy`）；移除 Go 后端、Next.js 前端及旧脚本。详见 `docs/migration.md`。
+
+### 旧版（Go）
+
 - 部署统一为 Linux amd64 / arm64 本地源码构建，安装和更新共用编译脚本。
 - 移除应用内更新、旧的跨平台分发流程、过时的社区推广和自定义使用条款。
 - 应用配置改用 TOML，支持读取旧版 JSON 并显式迁移到 TOML。
@@ -407,7 +417,7 @@
 
 ### 部署与更新
 
-- 此版本曾引入应用内更新和守护启动。当前部署统一采用源码构建，详见 [更新升级](README.zh-CN.md#更新升级)。
+- 此版本曾引入应用内更新和守护启动。当前部署统一采用源码构建，详见 [更新升级](https://github.com/Clementine-Miles/ARUSTEX/blob/3d0caa9402f76d3be5dc03eca796dfb0afe088ea/README.zh-CN.md#更新升级)。
 
 ### 依赖
 
@@ -826,7 +836,7 @@
 
 ### 构建
 
-- 此版本曾加入跨平台构建和分发流程，当前部署支持范围见 [安装](README.zh-CN.md#安装)。
+- 此版本曾加入跨平台构建和分发流程，当前部署支持范围见 [安装](https://github.com/Clementine-Miles/ARUSTEX/blob/3d0caa9402f76d3be5dc03eca796dfb0afe088ea/README.zh-CN.md#安装)。
 
 ### 贡献者
 
