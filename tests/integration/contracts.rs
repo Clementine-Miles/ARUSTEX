@@ -2,6 +2,7 @@
 
 use arustex_app::config::Config;
 use arustex_core::domain::agent::AgentRole;
+use arustex_core::domain::record::RecordInput;
 use arustex_core::ipc::{self, PROTOCOL_VERSION, ServerFrame};
 use arustex_operations::Registry;
 use arustex_policy::Policy;
@@ -99,4 +100,16 @@ fn operation_registry_is_closed_and_strict() {
             }
         }
     }
+}
+
+/// The demonstration dataset is synthetic and must stay importable.
+#[test]
+fn synthetic_record_fixture_parses() {
+    let text = std::fs::read_to_string(root("tests/fixtures/records/inventory.jsonl")).unwrap();
+    let records: Vec<RecordInput> = text
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap_or_else(|e| panic!("{l}: {e}")))
+        .collect();
+    assert_eq!(records.len(), 5);
+    assert!(records.iter().all(|r| r.external_id.starts_with("inv-")));
 }

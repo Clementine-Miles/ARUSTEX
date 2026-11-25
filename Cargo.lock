@@ -226,6 +226,13 @@ dependencies = [
 [[package]]
 name = "arustex-tests"
 version = "0.1.0"
+dependencies = [
+ "arustex-app",
+ "arustex-core",
+ "arustex-operations",
+ "arustex-policy",
+ "serde_json",
+]
 
 [[package]]
 name = "arustex-tui"
