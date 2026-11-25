@@ -1,3 +1,6 @@
+# rust
+/target/
+
 # backend
 /data/
 *.db
@@ -26,8 +29,6 @@ web/next-env.d.ts
 *.swp
 *.swo
 
-# docs
-/docs/
 
 # os
 .DS_Store
