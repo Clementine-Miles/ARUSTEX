@@ -1,0 +1,25 @@
+[package]
+name = "arustex-tests"
+description = "Cross-crate contract tests: wire format, configuration and operation boundaries"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license-file.workspace = true
+publish.workspace = true
+
+[lib]
+path = "lib.rs"
+
+[[test]]
+name = "contracts"
+path = "integration/contracts.rs"
+
+[dev-dependencies]
+arustex-app.workspace = true
+arustex-core.workspace = true
+arustex-operations.workspace = true
+arustex-policy.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

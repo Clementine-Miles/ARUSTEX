@@ -1,0 +1,20 @@
+ARUSTEX
+Copyright the ARUSTEX and ARTEX contributors.
+
+This program is free software, licensed under the GNU Affero General Public License,
+version 3 (see LICENSE).
+
+This tree is a Rust rewrite of the Go and Next.js implementation previously published
+in this repository (https://github.com/Clementine-Miles/ARUSTEX), whose history and
+contributors are recorded in git and in CHANGELOG.md. The legacy source remains
+available in the repository history.
+
+The module layering follows the architecture of ARTEX-Desktop
+(https://github.com/froiibn/ARTEX-Desktop), used as a design reference.
+
+The legacy web frontend contained MIT-licensed material (copyright 2024 Mohammed
+Arham Khan). That frontend is not part of this tree; its license text is kept in the
+repository history with the code it covered.
+
+Third-party Rust crates are used under their own licenses, as listed in Cargo.lock
+and each crate's metadata.

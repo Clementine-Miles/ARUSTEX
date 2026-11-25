@@ -1,0 +1,67 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/arustex-core",
+    "crates/arustex-policy",
+    "crates/arustex-store",
+    "crates/arustex-llm",
+    "crates/arustex-operations",
+    "crates/arustex-runtime",
+    "crates/arustex-app",
+    "crates/arustex-tui",
+    "apps/arustex",
+    "tests",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.100.0"
+license-file = "LICENSE"
+publish = false
+
+[workspace.dependencies]
+arustex-core = { path = "crates/arustex-core" }
+arustex-policy = { path = "crates/arustex-policy" }
+arustex-store = { path = "crates/arustex-store" }
+arustex-llm = { path = "crates/arustex-llm" }
+arustex-operations = { path = "crates/arustex-operations" }
+arustex-runtime = { path = "crates/arustex-runtime" }
+arustex-app = { path = "crates/arustex-app" }
+arustex-tui = { path = "crates/arustex-tui" }
+
+async-trait = "0.1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
+clap = { version = "4.6", features = ["derive", "env"] }
+crossterm = { version = "0.29", features = ["event-stream"] }
+futures = "0.3"
+hex = "0.4"
+ratatui = { version = "0.30", default-features = false, features = ["crossterm"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "stream", "http2"] }
+serde = { version = "1", features = ["derive"] }
+schemars = "1.2"
+serde_json = "1"
+sha2 = "0.11"
+sqlx = { version = "0.9", default-features = false, features = ["postgres", "runtime-tokio", "tls-rustls-aws-lc-rs", "migrate", "json", "uuid", "chrono", "macros"] }
+tempfile = "3"
+thiserror = "2"
+tokio = { version = "1.54", features = ["rt-multi-thread", "macros", "net", "io-util", "sync", "time", "signal", "fs"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+toml = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+uuid = { version = "1", features = ["v4", "v7", "serde"] }
+wiremock = "0.6"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+
+[profile.release]
+lto = "thin"
+codegen-units = 4
+strip = "symbols"

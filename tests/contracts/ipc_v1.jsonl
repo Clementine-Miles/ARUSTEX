@@ -1,0 +1,7 @@
+{"v":1,"id":1,"request":{"method":"hello","params":{"client":"golden"}}}
+{"v":1,"id":2,"request":{"method":"ping"}}
+{"v":1,"id":3,"request":{"method":"list_tasks","params":{"page":{"offset":0,"limit":50}}}}
+{"v":1,"id":4,"request":{"method":"control_task","params":{"id":7,"action":"pause"}}}
+{"v":1,"id":5,"request":{"method":"decide_approval","params":{"id":3,"approve":true,"reason":null}}}
+{"v":1,"id":6,"request":{"method":"subscribe","params":{"after_seq":120}}}
+{"v":1,"id":7,"request":{"method":"assistant_message","params":{"task_id":7,"text":"Which records disagree?"}}}

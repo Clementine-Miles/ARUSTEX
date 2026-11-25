@@ -1,0 +1,5 @@
+{"external_id":"inv-001","title":"Build host configuration","content_type":"application/json","body":"{\"os\":\"linux\",\"packages\":[\"postgresql-16\",\"rustc-1.100\"]}","fields":{"team":"platform","environment":"staging","owner":"ops"}}
+{"external_id":"inv-002","title":"Report service configuration","content_type":"application/json","body":"{\"replicas\":2,\"retention_days\":30}","fields":{"team":"reports","environment":"staging","owner":"ops"}}
+{"external_id":"inv-003","title":"Report service configuration","content_type":"application/json","body":"{\"replicas\":3,\"retention_days\":7}","fields":{"team":"reports","environment":"production","owner":"ops"}}
+{"external_id":"inv-004","title":"Change log entry","body":"Retention for the report service was shortened in production during the last release.","fields":{"team":"reports","environment":"production","owner":"release"}}
+{"external_id":"inv-005","title":"Ownership note","body":"The analytics dataset has no listed owner.","fields":{"team":"analytics","environment":"staging"}}
