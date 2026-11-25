@@ -353,8 +353,12 @@ impl Connection {
         if let Some(s) = subscription {
             s.abort();
         }
-        self.cancel.cancel();
-        let _ = writer.await;
+        // Let the writer flush what is queued (such as a final error), then stop.
+        drop(outbox);
+        let timeout = self.settings.request_timeout;
+        if tokio::time::timeout(timeout, writer).await.is_err() {
+            self.cancel.cancel();
+        }
     }
 }
 
