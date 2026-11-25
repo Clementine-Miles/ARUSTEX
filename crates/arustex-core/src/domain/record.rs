@@ -193,8 +193,14 @@ fn redact_token(word: &str) -> String {
     // key=value or key:value secrets
     for sep in ['=', ':'] {
         if let Some((key, value)) = word.split_once(sep) {
-            let key_l = key.trim_matches(|c: char| !c.is_alphanumeric() && c != '_').to_lowercase();
-            if !value.is_empty() && SECRET_KEYS.iter().any(|k| key_l == *k || key_l.ends_with(&format!("_{k}"))) {
+            let key_l = key
+                .trim_matches(|c: char| !c.is_alphanumeric() && c != '_')
+                .to_lowercase();
+            if !value.is_empty()
+                && SECRET_KEYS
+                    .iter()
+                    .any(|k| key_l == *k || key_l.ends_with(&format!("_{k}")))
+            {
                 return format!("{key}{sep}[REDACTED]");
             }
         }
@@ -211,7 +217,9 @@ fn redact_token(word: &str) -> String {
     }
     // long digit runs (account / card style numbers), allowing separators
     let digits = core.chars().filter(char::is_ascii_digit).count();
-    let only_numeric = core.chars().all(|c| c.is_ascii_digit() || c == '-' || c == ' ');
+    let only_numeric = core
+        .chars()
+        .all(|c| c.is_ascii_digit() || c == '-' || c == ' ');
     if digits >= 12 && only_numeric {
         return word.replace(core, "[NUMBER]");
     }

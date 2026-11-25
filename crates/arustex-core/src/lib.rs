@@ -8,8 +8,10 @@ pub mod error;
 pub mod events;
 pub mod ipc;
 pub mod ports;
+pub mod secret;
 
 pub use error::{CoreError, CoreResult, ErrorCode};
+pub use secret::Secret;
 
 /// Hard ceiling on the page size accepted by any listing call.
 pub const MAX_PAGE_SIZE: u32 = 500;

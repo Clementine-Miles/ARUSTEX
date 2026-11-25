@@ -32,10 +32,12 @@ impl Store {
         .await
         .map_err(db_err)?;
         let applied: Vec<i64> = if table_exists {
-            sqlx::query_scalar("SELECT version FROM _sqlx_migrations WHERE success ORDER BY version")
-                .fetch_all(self.pool())
-                .await
-                .map_err(db_err)?
+            sqlx::query_scalar(
+                "SELECT version FROM _sqlx_migrations WHERE success ORDER BY version",
+            )
+            .fetch_all(self.pool())
+            .await
+            .map_err(db_err)?
         } else {
             Vec::new()
         };

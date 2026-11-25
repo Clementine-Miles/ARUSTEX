@@ -169,14 +169,16 @@ impl Store {
             }
             AssetRelation::References | AssetRelation::DerivedFrom => {}
         }
-        sqlx::query("INSERT INTO asset_edges (src_id, dst_id, rel) VALUES ($1, $2, $3)
-             ON CONFLICT (src_id, rel, dst_id) DO NOTHING")
-            .bind(edge.src.0)
-            .bind(edge.dst.0)
-            .bind(edge.rel.as_str())
-            .execute(&mut *tx)
-            .await
-            .map_err(db_err)?;
+        sqlx::query(
+            "INSERT INTO asset_edges (src_id, dst_id, rel) VALUES ($1, $2, $3)
+             ON CONFLICT (src_id, rel, dst_id) DO NOTHING",
+        )
+        .bind(edge.src.0)
+        .bind(edge.dst.0)
+        .bind(edge.rel.as_str())
+        .execute(&mut *tx)
+        .await
+        .map_err(db_err)?;
         self.commit(tx, Vec::new()).await
     }
 
@@ -190,7 +192,11 @@ impl Store {
         asset_from_row(&row)
     }
 
-    pub async fn find_asset(&self, kind: AssetKind, identity_key: &str) -> CoreResult<Option<Asset>> {
+    pub async fn find_asset(
+        &self,
+        kind: AssetKind,
+        identity_key: &str,
+    ) -> CoreResult<Option<Asset>> {
         let key = arustex_core::domain::asset::normalize_identity(identity_key);
         let row = sqlx::query("SELECT * FROM assets WHERE kind = $1 AND identity_key = $2")
             .bind(kind.as_str())
@@ -271,11 +277,12 @@ impl Store {
 
     /// Loads the Asset Graph (bounded) and reports invariant violations.
     pub async fn check_asset_graph(&self) -> CoreResult<Vec<AssetGraphIssue>> {
-        let assets: Vec<(i64, String)> = sqlx::query_as("SELECT id, kind FROM assets ORDER BY id LIMIT $1")
-            .bind(MAX_GRAPH_CHECK_NODES)
-            .fetch_all(self.pool())
-            .await
-            .map_err(db_err)?;
+        let assets: Vec<(i64, String)> =
+            sqlx::query_as("SELECT id, kind FROM assets ORDER BY id LIMIT $1")
+                .bind(MAX_GRAPH_CHECK_NODES)
+                .fetch_all(self.pool())
+                .await
+                .map_err(db_err)?;
         let edges: Vec<(i64, i64, String)> =
             sqlx::query_as("SELECT src_id, dst_id, rel FROM asset_edges LIMIT $1")
                 .bind(MAX_GRAPH_CHECK_NODES * 4)
@@ -445,7 +452,10 @@ impl Store {
     }
 
     /// Bounded in-memory snapshot of an exploration graph.
-    pub async fn load_exploration(&self, exploration: ExplorationId) -> CoreResult<ExplorationSnapshot> {
+    pub async fn load_exploration(
+        &self,
+        exploration: ExplorationId,
+    ) -> CoreResult<ExplorationSnapshot> {
         let nodes: Vec<(i64, String, String)> = sqlx::query_as(
             "SELECT id, kind, state FROM exploration_nodes WHERE exploration_id = $1 ORDER BY id LIMIT $2",
         )
@@ -491,10 +501,16 @@ impl Store {
         }
         let mut anchors: BTreeMap<NodeId, BTreeSet<Anchor>> = BTreeMap::new();
         for (node, record) in record_anchors {
-            anchors.entry(NodeId(node)).or_default().insert(Anchor::Record(RecordId(record)));
+            anchors
+                .entry(NodeId(node))
+                .or_default()
+                .insert(Anchor::Record(RecordId(record)));
         }
         for (node, asset) in asset_anchors {
-            anchors.entry(NodeId(node)).or_default().insert(Anchor::Asset(AssetId(asset)));
+            anchors
+                .entry(NodeId(node))
+                .or_default()
+                .insert(Anchor::Asset(AssetId(asset)));
         }
         snapshot.anchors = anchors;
         Ok(snapshot)

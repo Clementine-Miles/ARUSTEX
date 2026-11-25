@@ -270,9 +270,15 @@ mod tests {
 
     #[test]
     fn outcome_maps_to_status() {
-        assert_eq!(TerminalOutcome::Completed.status(), SessionStatus::Completed);
         assert_eq!(
-            TerminalOutcome::BudgetExhausted { limit: "tokens".into() }.status(),
+            TerminalOutcome::Completed.status(),
+            SessionStatus::Completed
+        );
+        assert_eq!(
+            TerminalOutcome::BudgetExhausted {
+                limit: "tokens".into()
+            }
+            .status(),
             SessionStatus::NeedsReview
         );
     }

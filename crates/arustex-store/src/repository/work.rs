@@ -39,7 +39,10 @@ pub(crate) fn item_from_row(row: &PgRow) -> CoreResult<WorkItem> {
         lease_owner: row.try_get("lease_owner").map_err(db_err)?,
         lease_expires_at: row.try_get("lease_expires_at").map_err(db_err)?,
         operation_id: row.try_get("operation_id").map_err(db_err)?,
-        node_id: row.try_get::<Option<i64>, _>("node_id").map_err(db_err)?.map(NodeId),
+        node_id: row
+            .try_get::<Option<i64>, _>("node_id")
+            .map_err(db_err)?
+            .map(NodeId),
         session_id: row
             .try_get::<Option<uuid::Uuid>, _>("session_id")
             .map_err(db_err)?
@@ -75,10 +78,18 @@ fn trigger_from_row(row: &PgRow) -> CoreResult<Trigger> {
     let kind: String = row.try_get("kind").map_err(db_err)?;
     let spec = match kind.as_str() {
         "interval" => TriggerSpec::Interval {
-            seconds: to_u32(row.try_get::<Option<i32>, _>("interval_seconds").map_err(db_err)?.unwrap_or(0)),
+            seconds: to_u32(
+                row.try_get::<Option<i32>, _>("interval_seconds")
+                    .map_err(db_err)?
+                    .unwrap_or(0),
+            ),
         },
         "event" => TriggerSpec::RecordsImported,
-        other => return Err(CoreError::Integrity(format!("unknown trigger kind {other}"))),
+        other => {
+            return Err(CoreError::Integrity(format!(
+                "unknown trigger kind {other}"
+            )));
+        }
     };
     Ok(Trigger {
         id: row.try_get("id").map_err(db_err)?,
@@ -103,19 +114,28 @@ impl Store {
 
     /// Number of currently leased items of a task (the task's live worker count).
     pub async fn leased_count(&self, task: TaskId) -> CoreResult<u64> {
-        let n: i64 = sqlx::query_scalar("SELECT count(*) FROM work_items WHERE task_id = $1 AND status = 'leased'")
-            .bind(task.0)
-            .fetch_one(self.pool())
-            .await
-            .map_err(db_err)?;
+        let n: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM work_items WHERE task_id = $1 AND status = 'leased'",
+        )
+        .bind(task.0)
+        .fetch_one(self.pool())
+        .await
+        .map_err(db_err)?;
         Ok(to_u64(n))
     }
 
-    pub async fn create_trigger(&self, task: TaskId, spec: TriggerSpec, actor: &str) -> CoreResult<Trigger> {
+    pub async fn create_trigger(
+        &self,
+        task: TaskId,
+        spec: TriggerSpec,
+        actor: &str,
+    ) -> CoreResult<Trigger> {
         let (kind, interval, event) = match &spec {
             TriggerSpec::Interval { seconds } => {
                 if *seconds < 60 {
-                    return Err(CoreError::invalid("interval triggers need at least 60 seconds"));
+                    return Err(CoreError::invalid(
+                        "interval triggers need at least 60 seconds",
+                    ));
                 }
                 ("interval", Some(to_i32(*seconds)?), None)
             }
@@ -134,17 +154,26 @@ impl Store {
         .await
         .map_err(db_err)?;
         let trigger = trigger_from_row(&row)?;
-        audit(&mut tx, actor, "trigger.create", &format!("task:{task}"), serde_json::to_value(&spec).unwrap_or_default()).await?;
+        audit(
+            &mut tx,
+            actor,
+            "trigger.create",
+            &format!("task:{task}"),
+            serde_json::to_value(&spec).unwrap_or_default(),
+        )
+        .await?;
         self.commit(tx, Vec::new()).await?;
         Ok(trigger)
     }
 
     pub async fn list_triggers(&self, task: Option<TaskId>) -> CoreResult<Vec<Trigger>> {
-        let rows = sqlx::query("SELECT * FROM triggers WHERE ($1::bigint IS NULL OR task_id = $1) ORDER BY id")
-            .bind(task.map(|t| t.0))
-            .fetch_all(self.pool())
-            .await
-            .map_err(db_err)?;
+        let rows = sqlx::query(
+            "SELECT * FROM triggers WHERE ($1::bigint IS NULL OR task_id = $1) ORDER BY id",
+        )
+        .bind(task.map(|t| t.0))
+        .fetch_all(self.pool())
+        .await
+        .map_err(db_err)?;
         rows.iter().map(trigger_from_row).collect()
     }
 
@@ -219,7 +248,9 @@ impl WorkQueue for Store {
         let mut per_task: std::collections::BTreeMap<TaskId, u32> = Default::default();
         for item in &items {
             if item.record_ids.len() > 1000 {
-                return Err(CoreError::LimitExceeded("a work item covers at most 1000 records".into()));
+                return Err(CoreError::LimitExceeded(
+                    "a work item covers at most 1000 records".into(),
+                ));
             }
             if item.max_attempts == 0 {
                 return Err(CoreError::invalid("max_attempts must be at least 1"));
@@ -244,13 +275,29 @@ impl WorkQueue for Store {
         }
         let mut events = Vec::new();
         for (task, count) in per_task {
-            events.push(insert_event(&mut tx, Some(task), None, DomainEvent::WorkItemsPlanned { task_id: task, count }).await?);
+            events.push(
+                insert_event(
+                    &mut tx,
+                    Some(task),
+                    None,
+                    DomainEvent::WorkItemsPlanned {
+                        task_id: task,
+                        count,
+                    },
+                )
+                .await?,
+            );
         }
         self.commit(tx, events).await?;
         Ok(out)
     }
 
-    async fn claim(&self, worker: &str, task_id: Option<TaskId>, lease: Duration) -> CoreResult<Option<WorkItem>> {
+    async fn claim(
+        &self,
+        worker: &str,
+        task_id: Option<TaskId>,
+        lease: Duration,
+    ) -> CoreResult<Option<WorkItem>> {
         if worker.is_empty() || worker.len() > 128 {
             return Err(CoreError::invalid("worker id must be 1..=128 bytes"));
         }
@@ -295,7 +342,10 @@ impl WorkQueue for Store {
             &mut tx,
             Some(item.task_id),
             None,
-            DomainEvent::WorkItemClaimed { work_item_id: item.id, worker: worker.to_owned() },
+            DomainEvent::WorkItemClaimed {
+                work_item_id: item.id,
+                worker: worker.to_owned(),
+            },
         )
         .await?;
         self.commit(tx, vec![event]).await?;
@@ -316,7 +366,12 @@ impl WorkQueue for Store {
         Ok(r.rows_affected() == 1)
     }
 
-    async fn attach_session(&self, id: WorkItemId, worker: &str, session: SessionId) -> CoreResult<()> {
+    async fn attach_session(
+        &self,
+        id: WorkItemId,
+        worker: &str,
+        session: SessionId,
+    ) -> CoreResult<()> {
         let r = sqlx::query(
             "UPDATE work_items SET session_id = $3 WHERE id = $1 AND status = 'leased' AND lease_owner = $2",
         )
@@ -327,14 +382,23 @@ impl WorkQueue for Store {
         .await
         .map_err(db_err)?;
         if r.rows_affected() == 0 {
-            return Err(CoreError::Conflict(format!("lease on work item {id} was lost")));
+            return Err(CoreError::Conflict(format!(
+                "lease on work item {id} was lost"
+            )));
         }
         Ok(())
     }
 
-    async fn complete(&self, id: WorkItemId, worker: &str, result: serde_json::Value) -> CoreResult<()> {
+    async fn complete(
+        &self,
+        id: WorkItemId,
+        worker: &str,
+        result: serde_json::Value,
+    ) -> CoreResult<()> {
         if result.to_string().len() > 256 * 1024 {
-            return Err(CoreError::LimitExceeded("work item result too large".into()));
+            return Err(CoreError::LimitExceeded(
+                "work item result too large".into(),
+            ));
         }
         let mut tx = self.begin().await?;
         let task: Option<i64> = sqlx::query_scalar(
@@ -348,18 +412,28 @@ impl WorkQueue for Store {
         .fetch_optional(&mut *tx)
         .await
         .map_err(db_err)?;
-        let task = task.ok_or_else(|| CoreError::Conflict(format!("lease on work item {id} was lost")))?;
+        let task =
+            task.ok_or_else(|| CoreError::Conflict(format!("lease on work item {id} was lost")))?;
         let event = insert_event(
             &mut tx,
             Some(TaskId(task)),
             None,
-            DomainEvent::WorkItemFinished { work_item_id: id, succeeded: true },
+            DomainEvent::WorkItemFinished {
+                work_item_id: id,
+                succeeded: true,
+            },
         )
         .await?;
         self.commit(tx, vec![event]).await
     }
 
-    async fn fail(&self, id: WorkItemId, worker: &str, error: &str, retry: bool) -> CoreResult<WorkStatus> {
+    async fn fail(
+        &self,
+        id: WorkItemId,
+        worker: &str,
+        error: &str,
+        retry: bool,
+    ) -> CoreResult<WorkStatus> {
         let error: String = error.chars().take(2000).collect();
         let mut tx = self.begin().await?;
         let row = sqlx::query(
@@ -378,7 +452,10 @@ impl WorkQueue for Store {
         .map_err(db_err)?
         .ok_or_else(|| CoreError::Conflict(format!("lease on work item {id} was lost")))?;
         let task: i64 = row.try_get("task_id").map_err(db_err)?;
-        let status: WorkStatus = row.try_get::<String, _>("status").map_err(db_err)?.parse()?;
+        let status: WorkStatus = row
+            .try_get::<String, _>("status")
+            .map_err(db_err)?
+            .parse()?;
         let mut events = Vec::new();
         if status == WorkStatus::Failed {
             events.push(
@@ -386,7 +463,10 @@ impl WorkQueue for Store {
                     &mut tx,
                     Some(TaskId(task)),
                     None,
-                    DomainEvent::WorkItemFinished { work_item_id: id, succeeded: false },
+                    DomainEvent::WorkItemFinished {
+                        work_item_id: id,
+                        succeeded: false,
+                    },
                 )
                 .await?,
             );
@@ -436,12 +516,13 @@ impl WorkQueue for Store {
     }
 
     async fn counts(&self, task_id: TaskId) -> CoreResult<QueueCounts> {
-        let rows: Vec<(String, i64)> =
-            sqlx::query_as("SELECT status, count(*) FROM work_items WHERE task_id = $1 GROUP BY status")
-                .bind(task_id.0)
-                .fetch_all(self.pool())
-                .await
-                .map_err(db_err)?;
+        let rows: Vec<(String, i64)> = sqlx::query_as(
+            "SELECT status, count(*) FROM work_items WHERE task_id = $1 GROUP BY status",
+        )
+        .bind(task_id.0)
+        .fetch_all(self.pool())
+        .await
+        .map_err(db_err)?;
         let mut counts = QueueCounts::default();
         for (status, n) in rows {
             let n = to_u64(n);

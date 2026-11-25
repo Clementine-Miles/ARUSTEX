@@ -103,10 +103,20 @@ fn quote_ident(name: &str) -> String {
 impl Store {
     /// Writes a logical backup into `dir`, which must not exist or be empty.
     pub async fn backup_to(&self, dir: &Path) -> CoreResult<BackupManifest> {
-        tokio::fs::create_dir_all(dir).await.map_err(|e| io_err(dir, e))?;
+        tokio::fs::create_dir_all(dir)
+            .await
+            .map_err(|e| io_err(dir, e))?;
         let mut entries = tokio::fs::read_dir(dir).await.map_err(|e| io_err(dir, e))?;
-        if entries.next_entry().await.map_err(|e| io_err(dir, e))?.is_some() {
-            return Err(CoreError::Conflict(format!("backup directory {} is not empty", dir.display())));
+        if entries
+            .next_entry()
+            .await
+            .map_err(|e| io_err(dir, e))?
+            .is_some()
+        {
+            return Err(CoreError::Conflict(format!(
+                "backup directory {} is not empty",
+                dir.display()
+            )));
         }
         let mut tx = self.begin().await?;
         sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
@@ -116,10 +126,16 @@ impl Store {
         let mut tables = Vec::new();
         for table in BACKUP_TABLES {
             let columns = insertable_columns(&mut tx, table).await?;
-            let select = columns.iter().map(|c| quote_ident(c)).collect::<Vec<_>>().join(", ");
+            let select = columns
+                .iter()
+                .map(|c| quote_ident(c))
+                .collect::<Vec<_>>()
+                .join(", ");
             let file = format!("{table}.jsonl");
             let path = dir.join(&file);
-            let handle = tokio::fs::File::create(&path).await.map_err(|e| io_err(&path, e))?;
+            let handle = tokio::fs::File::create(&path)
+                .await
+                .map_err(|e| io_err(&path, e))?;
             let mut out = BufWriter::new(handle);
             let mut hasher = Sha256::new();
             let mut rows = 0u64;
@@ -127,17 +143,23 @@ impl Store {
                 "SELECT row_to_json(t)::text FROM (SELECT {select} FROM {table} ORDER BY 1, 2) t"
             );
             {
-                let mut stream = sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(sql)).fetch(&mut *tx);
+                let mut stream =
+                    sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(sql)).fetch(&mut *tx);
                 while let Some(line) = stream.try_next().await.map_err(db_err)? {
                     hasher.update(line.as_bytes());
                     hasher.update(b"\n");
-                    out.write_all(line.as_bytes()).await.map_err(|e| io_err(&path, e))?;
+                    out.write_all(line.as_bytes())
+                        .await
+                        .map_err(|e| io_err(&path, e))?;
                     out.write_all(b"\n").await.map_err(|e| io_err(&path, e))?;
                     rows += 1;
                 }
             }
             out.flush().await.map_err(|e| io_err(&path, e))?;
-            out.into_inner().sync_all().await.map_err(|e| io_err(&path, e))?;
+            out.into_inner()
+                .sync_all()
+                .await
+                .map_err(|e| io_err(&path, e))?;
             tables.push(TableManifest {
                 table: (*table).to_owned(),
                 file,
@@ -153,8 +175,11 @@ impl Store {
             tables,
         };
         let path = dir.join("manifest.json");
-        let body = serde_json::to_vec_pretty(&manifest).map_err(|e| CoreError::Internal(e.to_string()))?;
-        tokio::fs::write(&path, body).await.map_err(|e| io_err(&path, e))?;
+        let body =
+            serde_json::to_vec_pretty(&manifest).map_err(|e| CoreError::Internal(e.to_string()))?;
+        tokio::fs::write(&path, body)
+            .await
+            .map_err(|e| io_err(&path, e))?;
         Ok(manifest)
     }
 
@@ -165,11 +190,17 @@ impl Store {
             let path = backup_file(dir, table)?;
             let data = tokio::fs::read(&path).await.map_err(|e| io_err(&path, e))?;
             if hex::encode(Sha256::digest(&data)) != table.sha256 {
-                return Err(CoreError::Integrity(format!("{} does not match the manifest", table.file)));
+                return Err(CoreError::Integrity(format!(
+                    "{} does not match the manifest",
+                    table.file
+                )));
             }
             let lines = data.iter().filter(|b| **b == b'\n').count() as u64;
             if lines != table.rows {
-                return Err(CoreError::Integrity(format!("{} has {lines} rows, manifest says {}", table.file, table.rows)));
+                return Err(CoreError::Integrity(format!(
+                    "{} has {lines} rows, manifest says {}",
+                    table.file, table.rows
+                )));
             }
         }
         Ok(manifest)
@@ -201,16 +232,24 @@ impl Store {
         }
         for table in BACKUP_TABLES {
             let Some(entry) = manifest.tables.iter().find(|t| t.table == *table) else {
-                return Err(CoreError::Integrity(format!("manifest has no entry for {table}")));
+                return Err(CoreError::Integrity(format!(
+                    "manifest has no entry for {table}"
+                )));
             };
             let columns = insertable_columns(&mut tx, table).await?;
-            let list = columns.iter().map(|c| quote_ident(c)).collect::<Vec<_>>().join(", ");
+            let list = columns
+                .iter()
+                .map(|c| quote_ident(c))
+                .collect::<Vec<_>>()
+                .join(", ");
             let insert = format!(
                 "INSERT INTO {table} ({list}) OVERRIDING SYSTEM VALUE
                  SELECT {list} FROM jsonb_populate_recordset(NULL::{table}, $1::jsonb)"
             );
             let path = backup_file(dir, entry)?;
-            let file = tokio::fs::File::open(&path).await.map_err(|e| io_err(&path, e))?;
+            let file = tokio::fs::File::open(&path)
+                .await
+                .map_err(|e| io_err(&path, e))?;
             let mut lines = BufReader::new(file).lines();
             let mut batch: Vec<serde_json::Value> = Vec::with_capacity(RESTORE_BATCH);
             loop {
@@ -258,7 +297,10 @@ pub(crate) async fn reset_identity(
             "SELECT setval(pg_get_serial_sequence('{table}', '{column}'),
                            COALESCE((SELECT max({col}) FROM {table}), 0) + 1, false)"
         );
-        sqlx::query(sqlx::AssertSqlSafe(sql)).execute(&mut **tx).await.map_err(db_err)?;
+        sqlx::query(sqlx::AssertSqlSafe(sql))
+            .execute(&mut **tx)
+            .await
+            .map_err(db_err)?;
     }
     Ok(())
 }
@@ -277,10 +319,13 @@ impl Store {
 async fn read_manifest(dir: &Path) -> CoreResult<BackupManifest> {
     let path = dir.join("manifest.json");
     let data = tokio::fs::read(&path).await.map_err(|e| io_err(&path, e))?;
-    let manifest: BackupManifest =
-        serde_json::from_slice(&data).map_err(|e| CoreError::Integrity(format!("manifest.json: {e}")))?;
+    let manifest: BackupManifest = serde_json::from_slice(&data)
+        .map_err(|e| CoreError::Integrity(format!("manifest.json: {e}")))?;
     if manifest.format != MANIFEST_FORMAT {
-        return Err(CoreError::Invalid(format!("unsupported backup format {}", manifest.format)));
+        return Err(CoreError::Invalid(format!(
+            "unsupported backup format {}",
+            manifest.format
+        )));
     }
     Ok(manifest)
 }
@@ -289,7 +334,10 @@ async fn read_manifest(dir: &Path) -> CoreResult<BackupManifest> {
 fn backup_file(dir: &Path, entry: &TableManifest) -> CoreResult<PathBuf> {
     let expected = format!("{}.jsonl", entry.table);
     if entry.file != expected || !BACKUP_TABLES.contains(&entry.table.as_str()) {
-        return Err(CoreError::Integrity(format!("unexpected backup file {}", entry.file)));
+        return Err(CoreError::Integrity(format!(
+            "unexpected backup file {}",
+            entry.file
+        )));
     }
     Ok(dir.join(expected))
 }

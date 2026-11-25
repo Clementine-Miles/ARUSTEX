@@ -86,7 +86,10 @@ impl Store {
             &mut tx,
             Some(task_id),
             session_id,
-            DomainEvent::ReportGenerated { report_id: report.id, task_id },
+            DomainEvent::ReportGenerated {
+                report_id: report.id,
+                task_id,
+            },
         )
         .await?;
         self.commit(tx, vec![event]).await?;
@@ -101,8 +104,15 @@ impl Store {
         body_markdown: &str,
         document: serde_json::Value,
     ) -> CoreResult<Report> {
-        self.insert_report(task_id, title, body_markdown, document, Origin::Derived, None)
-            .await
+        self.insert_report(
+            task_id,
+            title,
+            body_markdown,
+            document,
+            Origin::Derived,
+            None,
+        )
+        .await
     }
 
     pub async fn get_report(&self, id: ReportId) -> CoreResult<Report> {
@@ -115,13 +125,19 @@ impl Store {
         report_from_row(&row)
     }
 
-    pub async fn list_reports(&self, task: Option<TaskId>, page: Page) -> CoreResult<Paged<ReportSummary>> {
+    pub async fn list_reports(
+        &self,
+        task: Option<TaskId>,
+        page: Page,
+    ) -> CoreResult<Paged<ReportSummary>> {
         let page = page.clamped();
-        let total: i64 = sqlx::query_scalar("SELECT count(*) FROM reports WHERE ($1::bigint IS NULL OR task_id = $1)")
-            .bind(task.map(|t| t.0))
-            .fetch_one(self.pool())
-            .await
-            .map_err(db_err)?;
+        let total: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM reports WHERE ($1::bigint IS NULL OR task_id = $1)",
+        )
+        .bind(task.map(|t| t.0))
+        .fetch_one(self.pool())
+        .await
+        .map_err(db_err)?;
         let rows = sqlx::query(
             "SELECT id, task_id, title, status, origin, created_at FROM reports
              WHERE ($1::bigint IS NULL OR task_id = $1) ORDER BY id DESC LIMIT $2 OFFSET $3",
@@ -161,25 +177,39 @@ impl Store {
         .await
         .map_err(db_err)?
         .ok_or_else(|| CoreError::Conflict(format!("report {id} is missing or already final")))?;
-        audit(&mut tx, actor, "report.finalize", &format!("report:{id}"), serde_json::json!({})).await?;
+        audit(
+            &mut tx,
+            actor,
+            "report.finalize",
+            &format!("report:{id}"),
+            serde_json::json!({}),
+        )
+        .await?;
         self.commit(tx, Vec::new()).await?;
         report_from_row(&row)
     }
 
     /// Queues a short notification. Callers pass only task status and non-sensitive
     /// summaries; the text is truncated to the outbox limit.
-    pub async fn enqueue_notification(&self, kind: &str, task: Option<TaskId>, text: &str) -> CoreResult<i64> {
+    pub async fn enqueue_notification(
+        &self,
+        kind: &str,
+        task: Option<TaskId>,
+        text: &str,
+    ) -> CoreResult<i64> {
         let text: String = text.chars().take(MAX_NOTIFICATION_CHARS).collect();
         if text.trim().is_empty() {
             return Err(CoreError::invalid("notification text must not be empty"));
         }
-        sqlx::query_scalar("INSERT INTO notifications (kind, task_id, text) VALUES ($1, $2, $3) RETURNING id")
-            .bind(kind)
-            .bind(task.map(|t| t.0))
-            .bind(text)
-            .fetch_one(self.pool())
-            .await
-            .map_err(db_err)
+        sqlx::query_scalar(
+            "INSERT INTO notifications (kind, task_id, text) VALUES ($1, $2, $3) RETURNING id",
+        )
+        .bind(kind)
+        .bind(task.map(|t| t.0))
+        .bind(text)
+        .fetch_one(self.pool())
+        .await
+        .map_err(db_err)
     }
 
     /// Claims due notifications for delivery. Items stuck in `sending` for more than
@@ -204,7 +234,10 @@ impl Store {
                 Ok(Notification {
                     id: row.try_get("id").map_err(db_err)?,
                     kind: row.try_get("kind").map_err(db_err)?,
-                    task_id: row.try_get::<Option<i64>, _>("task_id").map_err(db_err)?.map(TaskId),
+                    task_id: row
+                        .try_get::<Option<i64>, _>("task_id")
+                        .map_err(db_err)?
+                        .map(TaskId),
                     text: row.try_get("text").map_err(db_err)?,
                     attempts: to_u32(row.try_get("attempts").map_err(db_err)?),
                 })
@@ -222,7 +255,12 @@ impl Store {
     }
 
     /// Records a failed delivery. Retries back off exponentially until `max_attempts`.
-    pub async fn notification_failed(&self, id: i64, error: &str, max_attempts: u32) -> CoreResult<()> {
+    pub async fn notification_failed(
+        &self,
+        id: i64,
+        error: &str,
+        max_attempts: u32,
+    ) -> CoreResult<()> {
         let error: String = error.chars().take(500).collect();
         sqlx::query(
             "UPDATE notifications
@@ -242,10 +280,12 @@ impl Store {
 
     /// Marks every pending notification as skipped (delivery disabled).
     pub async fn skip_pending_notifications(&self) -> CoreResult<u64> {
-        let r = sqlx::query("UPDATE notifications SET state = 'skipped' WHERE state IN ('pending', 'sending')")
-            .execute(self.pool())
-            .await
-            .map_err(db_err)?;
+        let r = sqlx::query(
+            "UPDATE notifications SET state = 'skipped' WHERE state IN ('pending', 'sending')",
+        )
+        .execute(self.pool())
+        .await
+        .map_err(db_err)?;
         Ok(r.rows_affected())
     }
 }

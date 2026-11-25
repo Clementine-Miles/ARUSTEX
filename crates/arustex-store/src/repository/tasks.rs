@@ -129,7 +129,14 @@ impl Store {
             },
         )
         .await?;
-        audit(&mut tx, actor, "task.create", &format!("task:{id}"), serde_json::json!({})).await?;
+        audit(
+            &mut tx,
+            actor,
+            "task.create",
+            &format!("task:{id}"),
+            serde_json::json!({}),
+        )
+        .await?;
         self.commit(tx, vec![event]).await?;
         self.get_task(TaskId(id)).await
     }
@@ -140,9 +147,8 @@ impl Store {
             .fetch_one(self.pool())
             .await
             .map_err(db_err)?;
-        let sql = format!(
-            "SELECT {TASK_COLUMNS} FROM tasks t ORDER BY t.id DESC LIMIT $1 OFFSET $2"
-        );
+        let sql =
+            format!("SELECT {TASK_COLUMNS} FROM tasks t ORDER BY t.id DESC LIMIT $1 OFFSET $2");
         let rows = sqlx::query(sqlx::AssertSqlSafe(sql))
             .bind(i64::from(page.limit))
             .bind(i64::from(page.offset))
@@ -252,12 +258,13 @@ impl TaskStore for Store {
         reason: Option<String>,
     ) -> CoreResult<Task> {
         let mut tx = self.begin().await?;
-        let current: String = sqlx::query_scalar("SELECT status FROM tasks WHERE id = $1 FOR UPDATE")
-            .bind(id.0)
-            .fetch_optional(&mut *tx)
-            .await
-            .map_err(db_err)?
-            .ok_or_else(|| CoreError::not_found(format!("task {id}")))?;
+        let current: String =
+            sqlx::query_scalar("SELECT status FROM tasks WHERE id = $1 FOR UPDATE")
+                .bind(id.0)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(db_err)?
+                .ok_or_else(|| CoreError::not_found(format!("task {id}")))?;
         let from: TaskStatus = current.parse()?;
         from.ensure_transition(to)?;
         sqlx::query(
@@ -273,7 +280,11 @@ impl TaskStore for Store {
         .await
         .map_err(db_err)?;
         if to.is_terminal() {
-            let exploration_status = if to == TaskStatus::Completed { "achieved" } else { "failed" };
+            let exploration_status = if to == TaskStatus::Completed {
+                "achieved"
+            } else {
+                "failed"
+            };
             sqlx::query(
                 "UPDATE explorations SET status = $2 WHERE id = (SELECT exploration_id FROM tasks WHERE id = $1)",
             )

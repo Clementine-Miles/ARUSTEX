@@ -23,7 +23,10 @@ pub struct AttachmentLimits {
 
 impl Default for AttachmentLimits {
     fn default() -> Self {
-        Self { max_bytes: 64 * 1024 * 1024, chunk_size: 256 * 1024 }
+        Self {
+            max_bytes: 64 * 1024 * 1024,
+            chunk_size: 256 * 1024,
+        }
     }
 }
 
@@ -85,21 +88,30 @@ impl Store {
         actor: &str,
     ) -> CoreResult<Attachment> {
         if !ALLOWED_MEDIA_TYPES.contains(&meta.media_type.as_str()) {
-            return Err(CoreError::invalid(format!("media type {} is not allowed", meta.media_type)));
+            return Err(CoreError::invalid(format!(
+                "media type {} is not allowed",
+                meta.media_type
+            )));
         }
         if !(4096..=1024 * 1024).contains(&limits.chunk_size) {
-            return Err(CoreError::invalid("chunk size must be between 4 KiB and 1 MiB"));
+            return Err(CoreError::invalid(
+                "chunk size must be between 4 KiB and 1 MiB",
+            ));
         }
         let name = sanitize_name(&meta.name)?;
         let mut tx = self.begin().await?;
         // Stage chunks under a random key; the content hash is only known at the end.
         let staging = hex::encode(Sha256::digest(uuid::Uuid::new_v4().as_bytes()));
-        sqlx::query("INSERT INTO blobs (hash, size, chunk_size, chunk_count) VALUES ($1, 0, $2, 0)")
-            .bind(&staging)
-            .bind(to_i32(u32::try_from(limits.chunk_size).unwrap_or(u32::MAX))?)
-            .execute(&mut *tx)
-            .await
-            .map_err(db_err)?;
+        sqlx::query(
+            "INSERT INTO blobs (hash, size, chunk_size, chunk_count) VALUES ($1, 0, $2, 0)",
+        )
+        .bind(&staging)
+        .bind(to_i32(
+            u32::try_from(limits.chunk_size).unwrap_or(u32::MAX),
+        )?)
+        .execute(&mut *tx)
+        .await
+        .map_err(db_err)?;
         let mut whole = Sha256::new();
         let mut size: u64 = 0;
         let mut idx: i32 = 0;
@@ -142,11 +154,12 @@ impl Store {
             }
         }
         let hash = hex::encode(whole.finalize());
-        let existing: Option<bool> = sqlx::query_scalar("SELECT complete FROM blobs WHERE hash = $1 FOR UPDATE")
-            .bind(&hash)
-            .fetch_optional(&mut *tx)
-            .await
-            .map_err(db_err)?;
+        let existing: Option<bool> =
+            sqlx::query_scalar("SELECT complete FROM blobs WHERE hash = $1 FOR UPDATE")
+                .bind(&hash)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(db_err)?;
         match existing {
             Some(true) => {
                 sqlx::query("DELETE FROM blobs WHERE hash = $1")
@@ -222,19 +235,28 @@ impl Store {
         attachment_from_row(&row)
     }
 
-    pub async fn list_attachments(&self, owner: AttachmentOwner, owner_id: i64) -> CoreResult<Vec<Attachment>> {
-        let rows = sqlx::query("SELECT * FROM attachments WHERE owner = $1 AND owner_id = $2 ORDER BY id")
-            .bind(owner.as_str())
-            .bind(owner_id)
-            .fetch_all(self.pool())
-            .await
-            .map_err(db_err)?;
+    pub async fn list_attachments(
+        &self,
+        owner: AttachmentOwner,
+        owner_id: i64,
+    ) -> CoreResult<Vec<Attachment>> {
+        let rows =
+            sqlx::query("SELECT * FROM attachments WHERE owner = $1 AND owner_id = $2 ORDER BY id")
+                .bind(owner.as_str())
+                .bind(owner_id)
+                .fetch_all(self.pool())
+                .await
+                .map_err(db_err)?;
         rows.iter().map(attachment_from_row).collect()
     }
 
     /// Streams an attachment to `writer`, verifying every chunk and the full hash.
     /// On a mismatch the write stops with an integrity error.
-    pub async fn read_attachment<W: AsyncWrite + Unpin + Send>(&self, id: AttachmentId, mut writer: W) -> CoreResult<u64> {
+    pub async fn read_attachment<W: AsyncWrite + Unpin + Send>(
+        &self,
+        id: AttachmentId,
+        mut writer: W,
+    ) -> CoreResult<u64> {
         let attachment = self.get_attachment(id).await?;
         let hash = attachment.content_hash.as_str().to_owned();
         let (count, complete): (i32, bool) =
@@ -250,16 +272,19 @@ impl Store {
         let mut whole = Sha256::new();
         let mut written = 0u64;
         for idx in 0..count {
-            let (data, chunk_hash): (Vec<u8>, String) =
-                sqlx::query_as("SELECT data, chunk_hash FROM blob_chunks WHERE blob_hash = $1 AND idx = $2")
-                    .bind(&hash)
-                    .bind(idx)
-                    .fetch_optional(self.pool())
-                    .await
-                    .map_err(db_err)?
-                    .ok_or_else(|| CoreError::Integrity(format!("blob {hash} chunk {idx} is missing")))?;
+            let (data, chunk_hash): (Vec<u8>, String) = sqlx::query_as(
+                "SELECT data, chunk_hash FROM blob_chunks WHERE blob_hash = $1 AND idx = $2",
+            )
+            .bind(&hash)
+            .bind(idx)
+            .fetch_optional(self.pool())
+            .await
+            .map_err(db_err)?
+            .ok_or_else(|| CoreError::Integrity(format!("blob {hash} chunk {idx} is missing")))?;
             if hex::encode(Sha256::digest(&data)) != chunk_hash {
-                return Err(CoreError::Integrity(format!("blob {hash} chunk {idx} is corrupt")));
+                return Err(CoreError::Integrity(format!(
+                    "blob {hash} chunk {idx} is corrupt"
+                )));
             }
             whole.update(&data);
             writer
@@ -269,7 +294,9 @@ impl Store {
             written += data.len() as u64;
         }
         if hex::encode(whole.finalize()) != hash || written != attachment.size {
-            return Err(CoreError::Integrity(format!("blob {hash} does not match its hash")));
+            return Err(CoreError::Integrity(format!(
+                "blob {hash} does not match its hash"
+            )));
         }
         writer
             .flush()
@@ -294,7 +321,14 @@ impl Store {
         if r.rows_affected() == 0 {
             return Err(CoreError::not_found(format!("attachment {id}")));
         }
-        audit(&mut tx, actor, "attachment.delete", &format!("attachment:{id}"), serde_json::json!({})).await?;
+        audit(
+            &mut tx,
+            actor,
+            "attachment.delete",
+            &format!("attachment:{id}"),
+            serde_json::json!({}),
+        )
+        .await?;
         self.commit(tx, Vec::new()).await
     }
 
@@ -302,11 +336,13 @@ impl Store {
     /// Returns `(attachments, blobs)` removed.
     pub async fn collect_garbage(&self) -> CoreResult<(u64, u64)> {
         let mut tx = self.begin().await?;
-        let expired = sqlx::query("DELETE FROM attachments WHERE retention_until IS NOT NULL AND retention_until < now()")
-            .execute(&mut *tx)
-            .await
-            .map_err(db_err)?
-            .rows_affected();
+        let expired = sqlx::query(
+            "DELETE FROM attachments WHERE retention_until IS NOT NULL AND retention_until < now()",
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(db_err)?
+        .rows_affected();
         let blobs = sqlx::query(
             "DELETE FROM blobs b WHERE NOT EXISTS (SELECT 1 FROM attachments a WHERE a.blob_hash = b.hash)",
         )
@@ -343,13 +379,14 @@ impl Store {
             let mut whole = Sha256::new();
             let mut ok = true;
             for idx in 0..count {
-                let (data, chunk_hash): (Vec<u8>, String) =
-                    sqlx::query_as("SELECT data, chunk_hash FROM blob_chunks WHERE blob_hash = $1 AND idx = $2")
-                        .bind(&hash)
-                        .bind(idx)
-                        .fetch_one(self.pool())
-                        .await
-                        .map_err(db_err)?;
+                let (data, chunk_hash): (Vec<u8>, String) = sqlx::query_as(
+                    "SELECT data, chunk_hash FROM blob_chunks WHERE blob_hash = $1 AND idx = $2",
+                )
+                .bind(&hash)
+                .bind(idx)
+                .fetch_one(self.pool())
+                .await
+                .map_err(db_err)?;
                 if hex::encode(Sha256::digest(&data)) != chunk_hash {
                     ok = false;
                     break;

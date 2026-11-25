@@ -107,7 +107,9 @@ impl NewFinding {
             return Err(CoreError::LimitExceeded("finding text too long".into()));
         }
         if self.record_ids.len() + self.asset_ids.len() > MAX_FINDING_REFERENCES {
-            return Err(CoreError::LimitExceeded("finding references too many items".into()));
+            return Err(CoreError::LimitExceeded(
+                "finding references too many items".into(),
+            ));
         }
         Ok(())
     }
@@ -217,9 +219,15 @@ mod tests {
 
     #[test]
     fn legacy_status_mapping() {
-        assert_eq!(FindingStatus::from_legacy("false_positive"), FindingStatus::Dismissed);
+        assert_eq!(
+            FindingStatus::from_legacy("false_positive"),
+            FindingStatus::Dismissed
+        );
         assert_eq!(FindingStatus::from_legacy("fixed"), FindingStatus::Resolved);
-        assert_eq!(FindingStatus::from_legacy("whatever"), FindingStatus::Pending);
+        assert_eq!(
+            FindingStatus::from_legacy("whatever"),
+            FindingStatus::Pending
+        );
     }
 
     #[test]

@@ -148,8 +148,11 @@ pub(crate) fn to_i32(value: u32) -> CoreResult<i32> {
     i32::try_from(value).map_err(|_| CoreError::invalid("value exceeds i32 range"))
 }
 
-pub(crate) fn parse_json<T: serde::de::DeserializeOwned>(value: serde_json::Value) -> CoreResult<T> {
-    serde_json::from_value(value).map_err(|e| CoreError::Integrity(format!("stored JSON is invalid: {e}")))
+pub(crate) fn parse_json<T: serde::de::DeserializeOwned>(
+    value: serde_json::Value,
+) -> CoreResult<T> {
+    serde_json::from_value(value)
+        .map_err(|e| CoreError::Integrity(format!("stored JSON is invalid: {e}")))
 }
 
 /// Records a durable event inside an open transaction. The returned envelope must be

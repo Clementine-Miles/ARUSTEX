@@ -1,6 +1,6 @@
 use arustex_core::domain::agent::{
-    NewSession, PromptTemplate, Session, SessionId, SessionStatus, TerminalOutcome,
-    TokenUsage, TranscriptEntry, TranscriptKind,
+    NewSession, PromptTemplate, Session, SessionId, SessionStatus, TerminalOutcome, TokenUsage,
+    TranscriptEntry, TranscriptKind,
 };
 use arustex_core::domain::{TaskId, WorkItemId};
 use arustex_core::events::DomainEvent;
@@ -23,7 +23,10 @@ fn session_from_row(row: &PgRow) -> CoreResult<Session> {
     let outcome: Option<serde_json::Value> = row.try_get("outcome").map_err(db_err)?;
     Ok(Session {
         id: SessionId(row.try_get("id").map_err(db_err)?),
-        task_id: row.try_get::<Option<i64>, _>("task_id").map_err(db_err)?.map(TaskId),
+        task_id: row
+            .try_get::<Option<i64>, _>("task_id")
+            .map_err(db_err)?
+            .map(TaskId),
         work_item_id: row
             .try_get::<Option<i64>, _>("work_item_id")
             .map_err(db_err)?
@@ -71,7 +74,9 @@ impl Store {
     pub async fn put_prompt_template(&self, key: &str, body: &str) -> CoreResult<PromptTemplate> {
         arustex_core::domain::agent::AgentDefinition::validate_key(key)?;
         if body.is_empty() || body.len() > 65_536 {
-            return Err(CoreError::invalid("prompt template body must be 1..=65536 bytes"));
+            return Err(CoreError::invalid(
+                "prompt template body must be 1..=65536 bytes",
+            ));
         }
         let mut tx = self.begin().await?;
         sqlx::query("SELECT pg_advisory_xact_lock(hashtext($1))")
@@ -119,7 +124,11 @@ impl Store {
         .transpose()
     }
 
-    pub async fn list_sessions(&self, task: Option<TaskId>, page: Page) -> CoreResult<Paged<Session>> {
+    pub async fn list_sessions(
+        &self,
+        task: Option<TaskId>,
+        page: Page,
+    ) -> CoreResult<Paged<Session>> {
         let page = page.clamped();
         let total: i64 = sqlx::query_scalar(
             "SELECT count(*) FROM sessions WHERE ($1::bigint IS NULL OR task_id = $1)",
@@ -139,7 +148,10 @@ impl Store {
             .fetch_all(self.pool())
             .await
             .map_err(db_err)?;
-        let items = rows.iter().map(session_from_row).collect::<CoreResult<_>>()?;
+        let items = rows
+            .iter()
+            .map(session_from_row)
+            .collect::<CoreResult<_>>()?;
         Ok(Paged::new(items, to_u64(total), page))
     }
 
@@ -210,7 +222,10 @@ impl SessionStore for Store {
             &mut tx,
             s.task_id,
             Some(s.id),
-            DomainEvent::SessionStarted { session_id: s.id, role: s.role },
+            DomainEvent::SessionStarted {
+                session_id: s.id,
+                role: s.role,
+            },
         )
         .await?;
         self.commit(tx, vec![event]).await?;
@@ -239,18 +254,21 @@ impl SessionStore for Store {
             return Err(CoreError::invalid("use finish_session for terminal states"));
         }
         let mut tx = self.begin().await?;
-        let row = sqlx::query(
-            "SELECT status, task_id FROM sessions WHERE id = $1 FOR UPDATE",
-        )
-        .bind(id.0)
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(db_err)?
-        .ok_or_else(|| CoreError::not_found(format!("session {id}")))?;
-        let current: SessionStatus = row.try_get::<String, _>("status").map_err(db_err)?.parse()?;
+        let row = sqlx::query("SELECT status, task_id FROM sessions WHERE id = $1 FOR UPDATE")
+            .bind(id.0)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(db_err)?
+            .ok_or_else(|| CoreError::not_found(format!("session {id}")))?;
+        let current: SessionStatus = row
+            .try_get::<String, _>("status")
+            .map_err(db_err)?
+            .parse()?;
         let task: Option<i64> = row.try_get("task_id").map_err(db_err)?;
         if current.is_terminal() {
-            return Err(CoreError::Conflict(format!("session {id} already finished")));
+            return Err(CoreError::Conflict(format!(
+                "session {id} already finished"
+            )));
         }
         sqlx::query("UPDATE sessions SET status = $2, turn = $3, tokens_used = $4 WHERE id = $1")
             .bind(id.0)
@@ -267,7 +285,10 @@ impl SessionStore for Store {
                     &mut tx,
                     task.map(TaskId),
                     Some(id),
-                    DomainEvent::SessionStatusChanged { session_id: id, status },
+                    DomainEvent::SessionStatusChanged {
+                        session_id: id,
+                        status,
+                    },
                 )
                 .await?,
             );
@@ -277,7 +298,8 @@ impl SessionStore for Store {
 
     async fn finish_session(&self, id: SessionId, outcome: &TerminalOutcome) -> CoreResult<()> {
         let status = outcome.status();
-        let payload = serde_json::to_value(outcome).map_err(|e| CoreError::Internal(e.to_string()))?;
+        let payload =
+            serde_json::to_value(outcome).map_err(|e| CoreError::Internal(e.to_string()))?;
         let mut tx = self.begin().await?;
         let task: Option<Option<i64>> = sqlx::query_scalar(
             "UPDATE sessions SET status = $2, outcome = $3, checkpoint = NULL
@@ -299,7 +321,10 @@ impl SessionStore for Store {
             &mut tx,
             task.map(TaskId),
             Some(id),
-            DomainEvent::SessionStatusChanged { session_id: id, status },
+            DomainEvent::SessionStatusChanged {
+                session_id: id,
+                status,
+            },
         )
         .await?;
         self.commit(tx, vec![event]).await
@@ -313,15 +338,18 @@ impl SessionStore for Store {
         usage: TokenUsage,
     ) -> CoreResult<TranscriptEntry> {
         if content.to_string().len() > MAX_TRANSCRIPT_ENTRY_BYTES {
-            return Err(CoreError::LimitExceeded("transcript entry too large".into()));
+            return Err(CoreError::LimitExceeded(
+                "transcript entry too large".into(),
+            ));
         }
         let mut tx = self.begin().await?;
-        let task: Option<i64> = sqlx::query_scalar("SELECT task_id FROM sessions WHERE id = $1 FOR UPDATE")
-            .bind(id.0)
-            .fetch_optional(&mut *tx)
-            .await
-            .map_err(db_err)?
-            .ok_or_else(|| CoreError::not_found(format!("session {id}")))?;
+        let task: Option<i64> =
+            sqlx::query_scalar("SELECT task_id FROM sessions WHERE id = $1 FOR UPDATE")
+                .bind(id.0)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(db_err)?
+                .ok_or_else(|| CoreError::not_found(format!("session {id}")))?;
         let row = sqlx::query(
             "INSERT INTO transcript_entries (session_id, seq, kind, content, input_tokens, output_tokens)
              VALUES ($1, COALESCE((SELECT max(seq) FROM transcript_entries WHERE session_id = $1), 0) + 1,
@@ -341,14 +369,22 @@ impl SessionStore for Store {
             &mut tx,
             task.map(TaskId),
             Some(id),
-            DomainEvent::TranscriptAppended { session_id: id, seq: entry.seq },
+            DomainEvent::TranscriptAppended {
+                session_id: id,
+                seq: entry.seq,
+            },
         )
         .await?;
         self.commit(tx, vec![event]).await?;
         Ok(entry)
     }
 
-    async fn transcript(&self, id: SessionId, after_seq: i64, limit: u32) -> CoreResult<Vec<TranscriptEntry>> {
+    async fn transcript(
+        &self,
+        id: SessionId,
+        after_seq: i64,
+        limit: u32,
+    ) -> CoreResult<Vec<TranscriptEntry>> {
         let rows = sqlx::query(
             "SELECT session_id, seq, kind, content, input_tokens, output_tokens, created_at
              FROM transcript_entries WHERE session_id = $1 AND seq > $2 ORDER BY seq LIMIT $3",
@@ -362,7 +398,11 @@ impl SessionStore for Store {
         rows.iter().map(entry_from_row).collect()
     }
 
-    async fn save_checkpoint(&self, id: SessionId, checkpoint: serde_json::Value) -> CoreResult<()> {
+    async fn save_checkpoint(
+        &self,
+        id: SessionId,
+        checkpoint: serde_json::Value,
+    ) -> CoreResult<()> {
         if checkpoint.to_string().len() > MAX_CHECKPOINT_BYTES {
             return Err(CoreError::LimitExceeded("checkpoint too large".into()));
         }
@@ -377,7 +417,9 @@ impl SessionStore for Store {
         .map_err(db_err)?;
         if result.rows_affected() == 0 {
             self.get_session(id).await?;
-            return Err(CoreError::Conflict(format!("session {id} already finished")));
+            return Err(CoreError::Conflict(format!(
+                "session {id} already finished"
+            )));
         }
         Ok(())
     }
@@ -392,7 +434,13 @@ impl SessionStore for Store {
         row.ok_or_else(|| CoreError::not_found(format!("session {id}")))
     }
 
-    async fn record_usage(&self, id: SessionId, profile: &str, model: &str, usage: TokenUsage) -> CoreResult<()> {
+    async fn record_usage(
+        &self,
+        id: SessionId,
+        profile: &str,
+        model: &str,
+        usage: TokenUsage,
+    ) -> CoreResult<()> {
         sqlx::query(
             "INSERT INTO llm_usage (session_id, profile, model, input_tokens, output_tokens,
                                     cache_read_tokens, cache_write_tokens)

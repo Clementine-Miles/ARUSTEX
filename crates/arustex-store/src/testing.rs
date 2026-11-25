@@ -28,7 +28,10 @@ fn with_database(url: &str, name: &str) -> CoreResult<String> {
         Some((b, q)) => (b, Some(q)),
         None => (url, None),
     };
-    let scheme_end = base.find("://").ok_or_else(|| CoreError::invalid("invalid database url"))? + 3;
+    let scheme_end = base
+        .find("://")
+        .ok_or_else(|| CoreError::invalid("invalid database url"))?
+        + 3;
     let path_start = base[scheme_end..].find('/').map(|i| i + scheme_end);
     let host = match path_start {
         Some(i) => &base[..i],
@@ -55,36 +58,87 @@ impl TestDb {
                 return None;
             }
         };
-        Some(Self::create_at(&admin_url).await.expect("create test database"))
+        Some(
+            Self::create_at(&admin_url)
+                .await
+                .expect("create test database"),
+        )
     }
 
     pub async fn create_at(admin_url: &str) -> CoreResult<Self> {
-        let name = format!("arustex_test_{}", uuid::Uuid::new_v4().simple());
-        let mut admin = PgConnection::connect(admin_url).await.map_err(db_err)?;
-        sqlx::query(sqlx::AssertSqlSafe(format!("CREATE DATABASE {name}")))
-            .execute(&mut admin)
-            .await
-            .map_err(db_err)?;
-        admin.close().await.map_err(db_err)?;
-        let url = with_database(admin_url, &name)?;
-        let options = StoreOptions { max_connections: 8, ..StoreOptions::default() };
+        let (name, url) = create_database(admin_url).await?;
+        let options = StoreOptions {
+            max_connections: 8,
+            ..StoreOptions::default()
+        };
         let store = Store::connect(&url, &options).await?;
         store.migrate().await?;
-        Ok(Self { admin_url: admin_url.to_owned(), name, url, store })
+        Ok(Self {
+            admin_url: admin_url.to_owned(),
+            name,
+            url,
+            store,
+        })
     }
 
     /// Closes the pool and drops the database.
     pub async fn drop_db(self) {
         self.store.close().await;
-        if let Ok(mut admin) = PgConnection::connect(&self.admin_url).await {
-            let _ = sqlx::query(sqlx::AssertSqlSafe(format!(
-                "DROP DATABASE IF EXISTS {} WITH (FORCE)",
-                self.name
-            )))
-            .execute(&mut admin)
-            .await;
-            let _ = admin.close().await;
-        }
+        drop_database(&self.admin_url, &self.name).await;
+    }
+}
+
+/// An unmigrated scratch database (for example a legacy fixture).
+#[derive(Debug)]
+pub struct RawDb {
+    admin_url: String,
+    pub name: String,
+    pub pool: sqlx::PgPool,
+}
+
+impl RawDb {
+    pub async fn drop_db(self) {
+        self.pool.close().await;
+        drop_database(&self.admin_url, &self.name).await;
+    }
+}
+
+async fn drop_database(admin_url: &str, name: &str) {
+    if let Ok(mut admin) = PgConnection::connect(admin_url).await {
+        let _ = sqlx::query(sqlx::AssertSqlSafe(format!(
+            "DROP DATABASE IF EXISTS {name} WITH (FORCE)"
+        )))
+        .execute(&mut admin)
+        .await;
+        let _ = admin.close().await;
+    }
+}
+
+async fn create_database(admin_url: &str) -> CoreResult<(String, String)> {
+    let name = format!("arustex_test_{}", uuid::Uuid::new_v4().simple());
+    let mut admin = PgConnection::connect(admin_url).await.map_err(db_err)?;
+    sqlx::query(sqlx::AssertSqlSafe(format!("CREATE DATABASE {name}")))
+        .execute(&mut admin)
+        .await
+        .map_err(db_err)?;
+    admin.close().await.map_err(db_err)?;
+    let url = with_database(admin_url, &name)?;
+    Ok((name, url))
+}
+
+impl TestDb {
+    pub async fn create_raw(admin_url: &str) -> CoreResult<RawDb> {
+        let (name, url) = create_database(admin_url).await?;
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .max_connections(4)
+            .connect(&url)
+            .await
+            .map_err(db_err)?;
+        Ok(RawDb {
+            admin_url: admin_url.to_owned(),
+            name,
+            pool,
+        })
     }
 }
 
@@ -102,6 +156,9 @@ mod tests {
             with_database("postgres://u@h/postgres?sslmode=disable", "x").unwrap(),
             "postgres://u@h/x?sslmode=disable"
         );
-        assert_eq!(with_database("postgres://h", "x").unwrap(), "postgres://h/x");
+        assert_eq!(
+            with_database("postgres://h", "x").unwrap(),
+            "postgres://h/x"
+        );
     }
 }

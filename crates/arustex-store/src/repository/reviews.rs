@@ -1,7 +1,7 @@
 use arustex_core::domain::agent::SessionId;
 use arustex_core::domain::finding::{
-    ConfirmationStatus, Finding, FindingStatus, MAX_NOTE_BODY, NewFinding, NoteSubject,
-    ReviewNote, ReviewResult, Verdict,
+    ConfirmationStatus, Finding, FindingStatus, MAX_NOTE_BODY, NewFinding, NoteSubject, ReviewNote,
+    ReviewResult, Verdict,
 };
 use arustex_core::domain::report::Report;
 use arustex_core::domain::work::{Approval, ApprovalStatus, NewApproval};
@@ -29,8 +29,14 @@ fn finding_from_row(row: &PgRow) -> CoreResult<Finding> {
     let asset_ids: Vec<i64> = row.try_get("asset_ids").map_err(db_err)?;
     Ok(Finding {
         id: FindingId(row.try_get("id").map_err(db_err)?),
-        task_id: row.try_get::<Option<i64>, _>("task_id").map_err(db_err)?.map(TaskId),
-        node_id: row.try_get::<Option<i64>, _>("node_id").map_err(db_err)?.map(NodeId),
+        task_id: row
+            .try_get::<Option<i64>, _>("task_id")
+            .map_err(db_err)?
+            .map(TaskId),
+        node_id: row
+            .try_get::<Option<i64>, _>("node_id")
+            .map_err(db_err)?
+            .map(NodeId),
         title: row.try_get("title").map_err(db_err)?,
         category: row.try_get("category").map_err(db_err)?,
         severity: severity.parse()?,
@@ -42,7 +48,9 @@ fn finding_from_row(row: &PgRow) -> CoreResult<Finding> {
             origin: origin.parse()?,
             source: row.try_get("source").map_err(db_err)?,
             locator: row.try_get("locator").map_err(db_err)?,
-            session_id: row.try_get::<Option<uuid::Uuid>, _>("session_id").map_err(db_err)?,
+            session_id: row
+                .try_get::<Option<uuid::Uuid>, _>("session_id")
+                .map_err(db_err)?,
         },
         created_at: row.try_get("created_at").map_err(db_err)?,
         updated_at: row.try_get("updated_at").map_err(db_err)?,
@@ -58,7 +66,10 @@ fn approval_from_row(row: &PgRow) -> CoreResult<Approval> {
     let status: String = row.try_get("status").map_err(db_err)?;
     Ok(Approval {
         id: ApprovalId(row.try_get("id").map_err(db_err)?),
-        task_id: row.try_get::<Option<i64>, _>("task_id").map_err(db_err)?.map(TaskId),
+        task_id: row
+            .try_get::<Option<i64>, _>("task_id")
+            .map_err(db_err)?
+            .map(TaskId),
         session_id: row
             .try_get::<Option<uuid::Uuid>, _>("session_id")
             .map_err(db_err)?
@@ -108,7 +119,11 @@ fn note_from_row(row: &PgRow) -> CoreResult<ReviewNote> {
 impl Store {
     /// Inserts a finding with its record and asset references. Model-generated
     /// findings always start as `pending` regardless of the requested status.
-    pub async fn create_finding(&self, input: &NewFinding, legacy_id: Option<i64>) -> CoreResult<Finding> {
+    pub async fn create_finding(
+        &self,
+        input: &NewFinding,
+        legacy_id: Option<i64>,
+    ) -> CoreResult<Finding> {
         input.validate()?;
         let status = input.initial_status();
         let mut tx = self.begin().await?;
@@ -159,7 +174,10 @@ impl Store {
             &mut tx,
             input.task_id,
             input.provenance.session_id.map(SessionId),
-            DomainEvent::FindingRecorded { finding_id: FindingId(id), severity: input.severity },
+            DomainEvent::FindingRecorded {
+                finding_id: FindingId(id),
+                severity: input.severity,
+            },
         )
         .await?;
         self.commit(tx, vec![event]).await?;
@@ -177,7 +195,11 @@ impl Store {
         finding_from_row(&row)
     }
 
-    pub async fn list_findings(&self, task: Option<TaskId>, page: Page) -> CoreResult<Paged<Finding>> {
+    pub async fn list_findings(
+        &self,
+        task: Option<TaskId>,
+        page: Page,
+    ) -> CoreResult<Paged<Finding>> {
         let page = page.clamped();
         let total: i64 = sqlx::query_scalar(
             "SELECT count(*) FROM findings WHERE ($1::bigint IS NULL OR task_id = $1)",
@@ -197,7 +219,10 @@ impl Store {
             .fetch_all(self.pool())
             .await
             .map_err(db_err)?;
-        let items = rows.iter().map(finding_from_row).collect::<CoreResult<_>>()?;
+        let items = rows
+            .iter()
+            .map(finding_from_row)
+            .collect::<CoreResult<_>>()?;
         Ok(Paged::new(items, to_u64(total), page))
     }
 
@@ -216,16 +241,23 @@ impl Store {
     }
 
     pub async fn finding_count(&self, status: Option<FindingStatus>) -> CoreResult<u64> {
-        let n: i64 = sqlx::query_scalar("SELECT count(*) FROM findings WHERE ($1::text IS NULL OR status = $1)")
-            .bind(status.map(|s| s.as_str()))
-            .fetch_one(self.pool())
-            .await
-            .map_err(db_err)?;
+        let n: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM findings WHERE ($1::text IS NULL OR status = $1)",
+        )
+        .bind(status.map(|s| s.as_str()))
+        .fetch_one(self.pool())
+        .await
+        .map_err(db_err)?;
         Ok(to_u64(n))
     }
 
     /// Operator decision on a finding.
-    pub async fn set_finding_status(&self, id: FindingId, status: FindingStatus, actor: &str) -> CoreResult<Finding> {
+    pub async fn set_finding_status(
+        &self,
+        id: FindingId,
+        status: FindingStatus,
+        actor: &str,
+    ) -> CoreResult<Finding> {
         let mut tx = self.begin().await?;
         let task: Option<Option<i64>> =
             sqlx::query_scalar("UPDATE findings SET status = $2 WHERE id = $1 RETURNING task_id")
@@ -235,22 +267,40 @@ impl Store {
                 .await
                 .map_err(db_err)?;
         let task = task.ok_or_else(|| CoreError::not_found(format!("finding {id}")))?;
-        audit(&mut tx, actor, "finding.status", &format!("finding:{id}"), serde_json::json!({"status": status})).await?;
+        audit(
+            &mut tx,
+            actor,
+            "finding.status",
+            &format!("finding:{id}"),
+            serde_json::json!({"status": status}),
+        )
+        .await?;
         let event = insert_event(
             &mut tx,
             task.map(TaskId),
             None,
-            DomainEvent::FindingStatusChanged { finding_id: id, status },
+            DomainEvent::FindingStatusChanged {
+                finding_id: id,
+                status,
+            },
         )
         .await?;
         self.commit(tx, vec![event]).await?;
         self.get_finding(id).await
     }
 
-    pub async fn add_note(&self, subject: NoteSubject, subject_id: i64, author: &str, body: &str) -> CoreResult<ReviewNote> {
+    pub async fn add_note(
+        &self,
+        subject: NoteSubject,
+        subject_id: i64,
+        author: &str,
+        body: &str,
+    ) -> CoreResult<ReviewNote> {
         let body = body.trim();
         if body.is_empty() || body.len() > MAX_NOTE_BODY {
-            return Err(CoreError::invalid(format!("note body must be 1..={MAX_NOTE_BODY} bytes")));
+            return Err(CoreError::invalid(format!(
+                "note body must be 1..={MAX_NOTE_BODY} bytes"
+            )));
         }
         let table = match subject {
             NoteSubject::Task => "tasks",
@@ -282,7 +332,11 @@ impl Store {
         note_from_row(&row)
     }
 
-    pub async fn list_notes(&self, subject: NoteSubject, subject_id: i64) -> CoreResult<Vec<ReviewNote>> {
+    pub async fn list_notes(
+        &self,
+        subject: NoteSubject,
+        subject_id: i64,
+    ) -> CoreResult<Vec<ReviewNote>> {
         let rows = sqlx::query(
             "SELECT id, subject, subject_id, author, body, created_at FROM review_notes
              WHERE subject = $1 AND subject_id = $2 ORDER BY id LIMIT 500",
@@ -305,14 +359,20 @@ impl Store {
         approval_from_row(&row)
     }
 
-    pub async fn list_approvals(&self, status: Option<ApprovalStatus>, page: Page) -> CoreResult<Paged<Approval>> {
+    pub async fn list_approvals(
+        &self,
+        status: Option<ApprovalStatus>,
+        page: Page,
+    ) -> CoreResult<Paged<Approval>> {
         let page = page.clamped();
         let status = status.map(|s| s.as_str());
-        let total: i64 = sqlx::query_scalar("SELECT count(*) FROM approvals WHERE ($1::text IS NULL OR status = $1)")
-            .bind(status)
-            .fetch_one(self.pool())
-            .await
-            .map_err(db_err)?;
+        let total: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM approvals WHERE ($1::text IS NULL OR status = $1)",
+        )
+        .bind(status)
+        .fetch_one(self.pool())
+        .await
+        .map_err(db_err)?;
         let rows = sqlx::query(
             "SELECT * FROM approvals WHERE ($1::text IS NULL OR status = $1) ORDER BY id DESC LIMIT $2 OFFSET $3",
         )
@@ -322,7 +382,10 @@ impl Store {
         .fetch_all(self.pool())
         .await
         .map_err(db_err)?;
-        let items = rows.iter().map(approval_from_row).collect::<CoreResult<_>>()?;
+        let items = rows
+            .iter()
+            .map(approval_from_row)
+            .collect::<CoreResult<_>>()?;
         Ok(Paged::new(items, to_u64(total), page))
     }
 
@@ -334,7 +397,11 @@ impl Store {
         actor: &str,
         reason: Option<&str>,
     ) -> CoreResult<Approval> {
-        let status = if approve { ApprovalStatus::Approved } else { ApprovalStatus::Rejected };
+        let status = if approve {
+            ApprovalStatus::Approved
+        } else {
+            ApprovalStatus::Rejected
+        };
         let mut tx = self.begin().await?;
         let row = sqlx::query(
             "UPDATE approvals SET status = $2, decided_by = $3, reason = $4, decided_at = now()
@@ -349,15 +416,28 @@ impl Store {
         .map_err(db_err)?;
         let Some(row) = row else {
             let current = self.get_approval(id).await?;
-            return Err(CoreError::Conflict(format!("approval {id} is already {}", current.status)));
+            return Err(CoreError::Conflict(format!(
+                "approval {id} is already {}",
+                current.status
+            )));
         };
         let approval = approval_from_row(&row)?;
-        audit(&mut tx, actor, "approval.decide", &format!("approval:{id}"), serde_json::json!({"approve": approve})).await?;
+        audit(
+            &mut tx,
+            actor,
+            "approval.decide",
+            &format!("approval:{id}"),
+            serde_json::json!({"approve": approve}),
+        )
+        .await?;
         let event = insert_event(
             &mut tx,
             approval.task_id,
             approval.session_id,
-            DomainEvent::ApprovalDecided { approval_id: id, approved: approve },
+            DomainEvent::ApprovalDecided {
+                approval_id: id,
+                approved: approve,
+            },
         )
         .await?;
         self.commit(tx, vec![event]).await?;
@@ -365,8 +445,17 @@ impl Store {
     }
 
     /// Marks an approved request as applied or failed. Only approved requests move on.
-    pub async fn finish_approval(&self, id: ApprovalId, applied: bool, error: Option<&str>) -> CoreResult<()> {
-        let status = if applied { ApprovalStatus::Applied } else { ApprovalStatus::Failed };
+    pub async fn finish_approval(
+        &self,
+        id: ApprovalId,
+        applied: bool,
+        error: Option<&str>,
+    ) -> CoreResult<()> {
+        let status = if applied {
+            ApprovalStatus::Applied
+        } else {
+            ApprovalStatus::Failed
+        };
         let result = sqlx::query(
             "UPDATE approvals SET status = $2, reason = COALESCE($3, reason) WHERE id = $1 AND status = 'approved'",
         )
@@ -377,7 +466,9 @@ impl Store {
         .await
         .map_err(db_err)?;
         if result.rows_affected() == 0 {
-            return Err(CoreError::Conflict(format!("approval {id} is not approved")));
+            return Err(CoreError::Conflict(format!(
+                "approval {id} is not approved"
+            )));
         }
         Ok(())
     }
@@ -413,13 +504,19 @@ impl Store {
         result_from_row(&row)
     }
 
-    pub async fn list_review_results(&self, task: Option<TaskId>, page: Page) -> CoreResult<Paged<ReviewResult>> {
+    pub async fn list_review_results(
+        &self,
+        task: Option<TaskId>,
+        page: Page,
+    ) -> CoreResult<Paged<ReviewResult>> {
         let page = page.clamped();
-        let total: i64 = sqlx::query_scalar("SELECT count(*) FROM review_results WHERE ($1::bigint IS NULL OR task_id = $1)")
-            .bind(task.map(|t| t.0))
-            .fetch_one(self.pool())
-            .await
-            .map_err(db_err)?;
+        let total: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM review_results WHERE ($1::bigint IS NULL OR task_id = $1)",
+        )
+        .bind(task.map(|t| t.0))
+        .fetch_one(self.pool())
+        .await
+        .map_err(db_err)?;
         let rows = sqlx::query(
             "SELECT * FROM review_results WHERE ($1::bigint IS NULL OR task_id = $1)
              ORDER BY id DESC LIMIT $2 OFFSET $3",
@@ -430,7 +527,10 @@ impl Store {
         .fetch_all(self.pool())
         .await
         .map_err(db_err)?;
-        let items = rows.iter().map(result_from_row).collect::<CoreResult<_>>()?;
+        let items = rows
+            .iter()
+            .map(result_from_row)
+            .collect::<CoreResult<_>>()?;
         Ok(Paged::new(items, to_u64(total), page))
     }
 
@@ -445,8 +545,17 @@ impl Store {
         Ok(to_u64(n))
     }
 
-    pub async fn decide_review_result(&self, id: ReviewResultId, confirm: bool, actor: &str) -> CoreResult<ReviewResult> {
-        let status = if confirm { ConfirmationStatus::Confirmed } else { ConfirmationStatus::Rejected };
+    pub async fn decide_review_result(
+        &self,
+        id: ReviewResultId,
+        confirm: bool,
+        actor: &str,
+    ) -> CoreResult<ReviewResult> {
+        let status = if confirm {
+            ConfirmationStatus::Confirmed
+        } else {
+            ConfirmationStatus::Rejected
+        };
         let mut tx = self.begin().await?;
         let row = sqlx::query(
             "UPDATE review_results SET status = $2, decided_by = $3, decided_at = now()
@@ -458,8 +567,17 @@ impl Store {
         .fetch_optional(&mut *tx)
         .await
         .map_err(db_err)?
-        .ok_or_else(|| CoreError::Conflict(format!("review result {id} is missing or already decided")))?;
-        audit(&mut tx, actor, "review_result.decide", &format!("review_result:{id}"), serde_json::json!({"confirm": confirm})).await?;
+        .ok_or_else(|| {
+            CoreError::Conflict(format!("review result {id} is missing or already decided"))
+        })?;
+        audit(
+            &mut tx,
+            actor,
+            "review_result.decide",
+            &format!("review_result:{id}"),
+            serde_json::json!({"confirm": confirm}),
+        )
+        .await?;
         self.commit(tx, Vec::new()).await?;
         result_from_row(&row)
     }
@@ -476,7 +594,9 @@ impl ReviewSink for Store {
             return Err(CoreError::LimitExceeded("approval summary too long".into()));
         }
         if a.request.to_string().len() > MAX_APPROVAL_REQUEST_BYTES {
-            return Err(CoreError::LimitExceeded("approval request too large".into()));
+            return Err(CoreError::LimitExceeded(
+                "approval request too large".into(),
+            ));
         }
         let mut tx = self.begin().await?;
         let row = sqlx::query(
@@ -496,7 +616,10 @@ impl ReviewSink for Store {
             &mut tx,
             a.task_id,
             a.session_id,
-            DomainEvent::ApprovalRequested { approval_id: approval.id, operation: a.operation.clone() },
+            DomainEvent::ApprovalRequested {
+                approval_id: approval.id,
+                operation: a.operation.clone(),
+            },
         )
         .await?;
         self.commit(tx, vec![event]).await?;
@@ -516,7 +639,14 @@ impl ReviewSink for Store {
             "session_id": session_id,
             "draft": true,
         });
-        self.insert_report(task_id, title, body_markdown, document, Origin::ModelGenerated, Some(session_id))
-            .await
+        self.insert_report(
+            task_id,
+            title,
+            body_markdown,
+            document,
+            Origin::ModelGenerated,
+            Some(session_id),
+        )
+        .await
     }
 }

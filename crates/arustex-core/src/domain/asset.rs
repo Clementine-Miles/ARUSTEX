@@ -105,10 +105,14 @@ impl NewAsset {
             return Err(CoreError::invalid("asset attributes must be a JSON object"));
         }
         if self.attributes.to_string().len() > MAX_ASSET_ATTRIBUTES {
-            return Err(CoreError::LimitExceeded("asset attributes too large".into()));
+            return Err(CoreError::LimitExceeded(
+                "asset attributes too large".into(),
+            ));
         }
         if self.normalized_key().is_empty() {
-            return Err(CoreError::invalid("asset identity key is empty after normalization"));
+            return Err(CoreError::invalid(
+                "asset identity key is empty after normalization",
+            ));
         }
         Ok(())
     }
@@ -139,7 +143,10 @@ pub struct AssetGraph {
 pub enum AssetGraphIssue {
     DanglingEdge(AssetEdge),
     SelfLoop(AssetEdge),
-    MultipleParents { child: AssetId, parents: Vec<AssetId> },
+    MultipleParents {
+        child: AssetId,
+        parents: Vec<AssetId>,
+    },
     ContainmentCycle(Vec<AssetId>),
     DuplicateChain(Vec<AssetId>),
 }
@@ -187,7 +194,10 @@ impl AssetGraph {
         }
         for (child, list) in parents {
             if list.len() > 1 {
-                issues.push(AssetGraphIssue::MultipleParents { child, parents: list });
+                issues.push(AssetGraphIssue::MultipleParents {
+                    child,
+                    parents: list,
+                });
             }
         }
         if let Some(cycle) = self.containment().find_cycle() {
@@ -226,7 +236,10 @@ mod tests {
 
     #[test]
     fn normalization_deduplicates_cosmetic_variants() {
-        assert_eq!(normalize_identity("  Quarterly   Report. "), "quarterly report");
+        assert_eq!(
+            normalize_identity("  Quarterly   Report. "),
+            "quarterly report"
+        );
         assert_eq!(
             normalize_identity("Quarterly Report"),
             normalize_identity("quarterly  report.")
@@ -235,7 +248,10 @@ mod tests {
 
     #[test]
     fn healthy_tree_has_no_issues_and_ancestry() {
-        let g = graph(&[(1, 2, AssetRelation::Contains), (2, 3, AssetRelation::Contains)]);
+        let g = graph(&[
+            (1, 2, AssetRelation::Contains),
+            (2, 3, AssetRelation::Contains),
+        ]);
         assert!(g.check().is_empty());
         assert_eq!(g.ancestry(AssetId(3)), vec![AssetId(2), AssetId(1)]);
     }
@@ -251,8 +267,20 @@ mod tests {
             (7, 8, AssetRelation::DuplicateOf),
         ]);
         let issues = g.check();
-        assert!(issues.iter().any(|i| matches!(i, AssetGraphIssue::MultipleParents { .. })));
-        assert!(issues.iter().any(|i| matches!(i, AssetGraphIssue::ContainmentCycle(_))));
-        assert!(issues.iter().any(|i| matches!(i, AssetGraphIssue::DuplicateChain(_))));
+        assert!(
+            issues
+                .iter()
+                .any(|i| matches!(i, AssetGraphIssue::MultipleParents { .. }))
+        );
+        assert!(
+            issues
+                .iter()
+                .any(|i| matches!(i, AssetGraphIssue::ContainmentCycle(_)))
+        );
+        assert!(
+            issues
+                .iter()
+                .any(|i| matches!(i, AssetGraphIssue::DuplicateChain(_)))
+        );
     }
 }

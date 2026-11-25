@@ -55,12 +55,16 @@ impl<N: Ord + Copy + Hash> Digraph<N> {
     /// Breadth-first traversal from `start` following outgoing edges, visiting at most
     /// `max_nodes` nodes and descending at most `max_depth` levels.
     pub fn descendants(&self, start: N, max_depth: usize, max_nodes: usize) -> Vec<(N, usize)> {
-        self.bfs(start, max_depth, max_nodes, |g, n| g.successors(n).collect())
+        self.bfs(start, max_depth, max_nodes, |g, n| {
+            g.successors(n).collect()
+        })
     }
 
     /// Breadth-first traversal following incoming edges (ancestry).
     pub fn ancestors(&self, start: N, max_depth: usize, max_nodes: usize) -> Vec<(N, usize)> {
-        self.bfs(start, max_depth, max_nodes, |g, n| g.predecessors(n).collect())
+        self.bfs(start, max_depth, max_nodes, |g, n| {
+            g.predecessors(n).collect()
+        })
     }
 
     fn bfs(
@@ -148,11 +152,19 @@ mod tests {
     #[test]
     fn traversal_respects_depth_and_node_bounds() {
         let g = Digraph::from_edges([(1, 2), (2, 3), (3, 4), (1, 5)]);
-        let all: Vec<_> = g.descendants(1, 10, 100).into_iter().map(|(n, _)| n).collect();
+        let all: Vec<_> = g
+            .descendants(1, 10, 100)
+            .into_iter()
+            .map(|(n, _)| n)
+            .collect();
         assert_eq!(all, vec![2, 5, 3, 4]);
         assert_eq!(g.descendants(1, 1, 100).len(), 2);
         assert_eq!(g.descendants(1, 10, 2).len(), 2);
-        let up: Vec<_> = g.ancestors(4, 10, 100).into_iter().map(|(n, _)| n).collect();
+        let up: Vec<_> = g
+            .ancestors(4, 10, 100)
+            .into_iter()
+            .map(|(n, _)| n)
+            .collect();
         assert_eq!(up, vec![3, 2, 1]);
     }
 

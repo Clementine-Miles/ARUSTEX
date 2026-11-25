@@ -56,7 +56,8 @@ fn summary_from_row(row: &PgRow) -> CoreResult<RecordSummary> {
     })
 }
 
-const DATASET_COLUMNS: &str = "d.id, d.name, d.description, d.source, d.retention_days, d.created_at,
+const DATASET_COLUMNS: &str =
+    "d.id, d.name, d.description, d.source, d.retention_days, d.created_at,
     (SELECT count(*) FROM records r WHERE r.dataset_id = d.id) AS record_count";
 
 /// Result of one ingestion batch.
@@ -108,7 +109,14 @@ impl Store {
         .fetch_one(&mut *tx)
         .await
         .map_err(db_err)?;
-        audit(&mut tx, actor, "dataset.create", &format!("dataset:{id}"), serde_json::json!({"name": name})).await?;
+        audit(
+            &mut tx,
+            actor,
+            "dataset.create",
+            &format!("dataset:{id}"),
+            serde_json::json!({"name": name}),
+        )
+        .await?;
         self.commit(tx, Vec::new()).await?;
         self.get_dataset(DatasetId(id)).await
     }
@@ -140,14 +148,18 @@ impl Store {
             .fetch_one(self.pool())
             .await
             .map_err(db_err)?;
-        let sql = format!("SELECT {DATASET_COLUMNS} FROM datasets d ORDER BY d.id LIMIT $1 OFFSET $2");
+        let sql =
+            format!("SELECT {DATASET_COLUMNS} FROM datasets d ORDER BY d.id LIMIT $1 OFFSET $2");
         let rows = sqlx::query(sqlx::AssertSqlSafe(sql))
             .bind(i64::from(page.limit))
             .bind(i64::from(page.offset))
             .fetch_all(self.pool())
             .await
             .map_err(db_err)?;
-        let items = rows.iter().map(dataset_from_row).collect::<CoreResult<_>>()?;
+        let items = rows
+            .iter()
+            .map(dataset_from_row)
+            .collect::<CoreResult<_>>()?;
         Ok(Paged::new(items, to_u64(total), page))
     }
 
@@ -276,7 +288,10 @@ impl Store {
         .fetch_all(self.pool())
         .await
         .map_err(db_err)?;
-        let items = rows.iter().map(summary_from_row).collect::<CoreResult<_>>()?;
+        let items = rows
+            .iter()
+            .map(summary_from_row)
+            .collect::<CoreResult<_>>()?;
         Ok(Paged::new(items, to_u64(total), page))
     }
 
@@ -301,13 +316,22 @@ impl Store {
             .execute(&mut *tx)
             .await
             .map_err(|e| match db_err(e) {
-                CoreError::Invalid(m) => CoreError::Conflict(format!("dataset is still referenced: {m}")),
+                CoreError::Invalid(m) => {
+                    CoreError::Conflict(format!("dataset is still referenced: {m}"))
+                }
                 other => other,
             })?;
         if result.rows_affected() == 0 {
             return Err(CoreError::not_found(format!("dataset {id}")));
         }
-        audit(&mut tx, actor, "dataset.delete", &format!("dataset:{id}"), serde_json::json!({"records": removed})).await?;
+        audit(
+            &mut tx,
+            actor,
+            "dataset.delete",
+            &format!("dataset:{id}"),
+            serde_json::json!({"records": removed}),
+        )
+        .await?;
         self.commit(tx, Vec::new()).await?;
         Ok(to_u64(removed))
     }
@@ -371,15 +395,22 @@ impl RecordSource for Store {
     ) -> CoreResult<Vec<ImportedRecord>> {
         let datasets = self.scope_dataset_check(scope).await?;
         let wanted: Vec<i64> = ids.iter().map(|r| r.0).collect();
-        let rows = sqlx::query("SELECT * FROM records WHERE id = ANY($1) AND dataset_id = ANY($2) ORDER BY id")
-            .bind(&wanted)
-            .bind(&datasets)
-            .fetch_all(self.pool())
-            .await
-            .map_err(db_err)?;
-        let records: Vec<ImportedRecord> = rows.iter().map(record_from_row).collect::<CoreResult<_>>()?;
+        let rows = sqlx::query(
+            "SELECT * FROM records WHERE id = ANY($1) AND dataset_id = ANY($2) ORDER BY id",
+        )
+        .bind(&wanted)
+        .bind(&datasets)
+        .fetch_all(self.pool())
+        .await
+        .map_err(db_err)?;
+        let records: Vec<ImportedRecord> = rows
+            .iter()
+            .map(record_from_row)
+            .collect::<CoreResult<_>>()?;
         if records.len() != wanted.len() || records.iter().any(|r| !scope.allows(r)) {
-            return Err(CoreError::denied("one or more records are outside the approved scope"));
+            return Err(CoreError::denied(
+                "one or more records are outside the approved scope",
+            ));
         }
         Ok(records)
     }

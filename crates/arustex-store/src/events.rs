@@ -21,7 +21,9 @@ impl Store {
         .fetch_all(self.pool())
         .await
         .map_err(db_err)?;
-        rows.into_iter().map(|row| envelope_from_row(&row)).collect()
+        rows.into_iter()
+            .map(|row| envelope_from_row(&row))
+            .collect()
     }
 
     pub async fn recent_events(&self, limit: u32) -> CoreResult<Vec<EventEnvelope>> {
@@ -67,7 +69,10 @@ fn envelope_from_row(row: &sqlx::postgres::PgRow) -> CoreResult<EventEnvelope> {
     Ok(EventEnvelope {
         seq: row.try_get("seq").map_err(db_err)?,
         at: row.try_get("at").map_err(db_err)?,
-        task_id: row.try_get::<Option<i64>, _>("task_id").map_err(db_err)?.map(TaskId),
+        task_id: row
+            .try_get::<Option<i64>, _>("task_id")
+            .map_err(db_err)?
+            .map(TaskId),
         session_id: row
             .try_get::<Option<uuid::Uuid>, _>("session_id")
             .map_err(db_err)?

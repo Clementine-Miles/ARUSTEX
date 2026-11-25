@@ -61,11 +61,16 @@ impl ContentHash {
 
     /// Accepts a previously computed digest after validating its shape.
     pub fn parse(value: &str) -> crate::CoreResult<Self> {
-        let ok = value.len() == 64 && value.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'));
+        let ok = value.len() == 64
+            && value
+                .bytes()
+                .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'));
         if ok {
             Ok(Self(value.to_owned()))
         } else {
-            Err(crate::CoreError::invalid("content hash must be 64 lowercase hex digits"))
+            Err(crate::CoreError::invalid(
+                "content hash must be 64 lowercase hex digits",
+            ))
         }
     }
 
@@ -135,7 +140,6 @@ pub enum Origin {
     /// Computed deterministically by the application.
     Derived,
 }
-
 
 /// Implements `as_str` and `FromStr` for a fieldless enum with snake_case names.
 macro_rules! str_enum {

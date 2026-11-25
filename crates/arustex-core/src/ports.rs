@@ -152,8 +152,12 @@ pub trait TaskStore: Send + Sync {
     /// Record ids in the task's datasets, ascending, for deterministic planning.
     async fn task_record_ids(&self, id: TaskId) -> CoreResult<Vec<RecordId>>;
     /// Marks a planned work-item node and anchors it to its records.
-    async fn plan_node(&self, task_id: TaskId, title: &str, records: &[RecordId])
-    -> CoreResult<NodeId>;
+    async fn plan_node(
+        &self,
+        task_id: TaskId,
+        title: &str,
+        records: &[RecordId],
+    ) -> CoreResult<NodeId>;
     async fn set_node_state(&self, node: NodeId, state: &str) -> CoreResult<()>;
 }
 

@@ -65,7 +65,14 @@ impl NodeKind {
         match self {
             Self::Begin => &["open"],
             Self::Intent => &[
-                "open", "running", "paused", "done", "blocked", "exhausted", "stopped", "deleted",
+                "open",
+                "running",
+                "paused",
+                "done",
+                "blocked",
+                "exhausted",
+                "stopped",
+                "deleted",
             ],
             Self::Goal => &["open", "met", "abandoned"],
             Self::Fact => &["confirmed", "dismissed", "origin"],
@@ -83,7 +90,9 @@ impl NodeKind {
         if self.allowed_states().contains(&state) {
             Ok(())
         } else {
-            Err(CoreError::invalid(format!("state {state:?} is not valid for {self} nodes")))
+            Err(CoreError::invalid(format!(
+                "state {state:?} is not valid for {self} nodes"
+            )))
         }
     }
 
@@ -185,10 +194,17 @@ pub enum ExplorationIssue {
     MissingBegin,
     MultipleBegins(Vec<NodeId>),
     DanglingEdge(ExplorationEdge),
-    InvalidState { node: NodeId, kind: NodeKind, state: String },
+    InvalidState {
+        node: NodeId,
+        kind: NodeKind,
+        state: String,
+    },
     SpawnCycle(Vec<NodeId>),
     DerivationCycle(Vec<NodeId>),
-    MultipleSpawnParents { node: NodeId, parents: Vec<NodeId> },
+    MultipleSpawnParents {
+        node: NodeId,
+        parents: Vec<NodeId>,
+    },
     UnreachableIntent(NodeId),
 }
 
@@ -312,7 +328,8 @@ mod tests {
         s.nodes.insert(NodeId(1), (NodeKind::Begin, "open".into()));
         s.nodes.insert(NodeId(2), (NodeKind::Intent, "done".into()));
         s.nodes.insert(NodeId(3), (NodeKind::Intent, "open".into()));
-        s.nodes.insert(NodeId(4), (NodeKind::Finding, "confirmed".into()));
+        s.nodes
+            .insert(NodeId(4), (NodeKind::Finding, "confirmed".into()));
         for (src, dst, rel) in [
             (1, 2, EdgeRelation::Spawns),
             (1, 3, EdgeRelation::Spawns),
@@ -324,8 +341,10 @@ mod tests {
                 rel,
             });
         }
-        s.anchors
-            .insert(NodeId(2), BTreeSet::from([Anchor::Record(RecordId(10)), Anchor::Record(RecordId(11))]));
+        s.anchors.insert(
+            NodeId(2),
+            BTreeSet::from([Anchor::Record(RecordId(10)), Anchor::Record(RecordId(11))]),
+        );
         s.anchors
             .insert(NodeId(3), BTreeSet::from([Anchor::Record(RecordId(12))]));
         s
@@ -340,15 +359,29 @@ mod tests {
     fn coverage_counts_closed_nodes_only() {
         let scope = BTreeSet::from([RecordId(10), RecordId(11), RecordId(12), RecordId(13)]);
         let coverage = snapshot().coverage(&scope);
-        assert_eq!(coverage, ReviewCoverage { total: 4, reviewed: 2 });
+        assert_eq!(
+            coverage,
+            ReviewCoverage {
+                total: 4,
+                reviewed: 2
+            }
+        );
         assert_eq!(coverage.percent(), 50);
-        assert_eq!(ReviewCoverage { total: 0, reviewed: 0 }.percent(), 100);
+        assert_eq!(
+            ReviewCoverage {
+                total: 0,
+                reviewed: 0
+            }
+            .percent(),
+            100
+        );
     }
 
     #[test]
     fn detects_invalid_states_cycles_and_orphans() {
         let mut s = snapshot();
-        s.nodes.insert(NodeId(5), (NodeKind::Finding, "open".into()));
+        s.nodes
+            .insert(NodeId(5), (NodeKind::Finding, "open".into()));
         s.nodes.insert(NodeId(6), (NodeKind::Intent, "open".into()));
         s.edges.insert(ExplorationEdge {
             src: NodeId(3),
@@ -356,9 +389,21 @@ mod tests {
             rel: EdgeRelation::Spawns,
         });
         let issues = s.check();
-        assert!(issues.iter().any(|i| matches!(i, ExplorationIssue::InvalidState { .. })));
-        assert!(issues.iter().any(|i| matches!(i, ExplorationIssue::SpawnCycle(_))));
-        assert!(issues.iter().any(|i| matches!(i, ExplorationIssue::UnreachableIntent(NodeId(6)))));
+        assert!(
+            issues
+                .iter()
+                .any(|i| matches!(i, ExplorationIssue::InvalidState { .. }))
+        );
+        assert!(
+            issues
+                .iter()
+                .any(|i| matches!(i, ExplorationIssue::SpawnCycle(_)))
+        );
+        assert!(
+            issues
+                .iter()
+                .any(|i| matches!(i, ExplorationIssue::UnreachableIntent(NodeId(6))))
+        );
     }
 
     #[test]

@@ -9,12 +9,14 @@ use serde::{Deserialize, Serialize};
 use crate::domain::agent::{Session, SessionId, TranscriptEntry};
 use crate::domain::asset::{Asset, AssetEdge};
 use crate::domain::exploration::ReviewCoverage;
-use crate::domain::finding::{Finding, FindingStatus, ReviewNote, ReviewResult, NoteSubject};
+use crate::domain::finding::{Finding, FindingStatus, NoteSubject, ReviewNote, ReviewResult};
 use crate::domain::record::{Dataset, ImportedRecord};
 use crate::domain::report::Report;
 use crate::domain::task::{NewTask, Task, TaskAction};
 use crate::domain::work::{Approval, ApprovalStatus};
-use crate::domain::{ApprovalId, AssetId, DatasetId, FindingId, RecordId, ReportId, ReviewResultId, TaskId};
+use crate::domain::{
+    ApprovalId, AssetId, DatasetId, FindingId, RecordId, ReportId, ReviewResultId, TaskId,
+};
 use crate::events::EventEnvelope;
 use crate::ports::{QueueCounts, RecordSummary};
 use crate::{CoreError, ErrorCode, Page, Paged};
@@ -74,36 +76,105 @@ impl From<WireError> for CoreError {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "method", content = "params", rename_all = "snake_case")]
 pub enum Request {
-    Hello { client: String },
+    Hello {
+        client: String,
+    },
     Ping,
     Dashboard,
-    ListTasks { page: Page },
-    GetTask { id: TaskId },
-    CreateTask { task: NewTask },
-    ControlTask { id: TaskId, action: TaskAction },
-    ListSessions { task_id: Option<TaskId>, page: Page },
-    GetTranscript { session_id: SessionId, after_seq: i64, limit: u32 },
-    ListApprovals { status: Option<ApprovalStatus>, page: Page },
-    DecideApproval { id: ApprovalId, approve: bool, reason: Option<String> },
-    ListAssets { query: Option<String>, page: Page },
-    GetAsset { id: AssetId },
-    ListDatasets { page: Page },
-    ListRecords { dataset_id: Option<DatasetId>, query: Option<String>, page: Page },
-    GetRecord { id: RecordId },
-    ListFindings { task_id: Option<TaskId>, page: Page },
-    SetFindingStatus { id: FindingId, status: FindingStatus },
-    ListReviewResults { task_id: Option<TaskId>, page: Page },
-    DecideReviewResult { id: ReviewResultId, confirm: bool },
-    AddNote { subject: NoteSubject, subject_id: i64, body: String },
-    ListNotes { subject: NoteSubject, subject_id: i64 },
-    ListReports { task_id: Option<TaskId>, page: Page },
-    GetReport { id: ReportId },
-    GenerateReport { task_id: TaskId },
+    ListTasks {
+        page: Page,
+    },
+    GetTask {
+        id: TaskId,
+    },
+    CreateTask {
+        task: NewTask,
+    },
+    ControlTask {
+        id: TaskId,
+        action: TaskAction,
+    },
+    ListSessions {
+        task_id: Option<TaskId>,
+        page: Page,
+    },
+    GetTranscript {
+        session_id: SessionId,
+        after_seq: i64,
+        limit: u32,
+    },
+    ListApprovals {
+        status: Option<ApprovalStatus>,
+        page: Page,
+    },
+    DecideApproval {
+        id: ApprovalId,
+        approve: bool,
+        reason: Option<String>,
+    },
+    ListAssets {
+        query: Option<String>,
+        page: Page,
+    },
+    GetAsset {
+        id: AssetId,
+    },
+    ListDatasets {
+        page: Page,
+    },
+    ListRecords {
+        dataset_id: Option<DatasetId>,
+        query: Option<String>,
+        page: Page,
+    },
+    GetRecord {
+        id: RecordId,
+    },
+    ListFindings {
+        task_id: Option<TaskId>,
+        page: Page,
+    },
+    SetFindingStatus {
+        id: FindingId,
+        status: FindingStatus,
+    },
+    ListReviewResults {
+        task_id: Option<TaskId>,
+        page: Page,
+    },
+    DecideReviewResult {
+        id: ReviewResultId,
+        confirm: bool,
+    },
+    AddNote {
+        subject: NoteSubject,
+        subject_id: i64,
+        body: String,
+    },
+    ListNotes {
+        subject: NoteSubject,
+        subject_id: i64,
+    },
+    ListReports {
+        task_id: Option<TaskId>,
+        page: Page,
+    },
+    GetReport {
+        id: ReportId,
+    },
+    GenerateReport {
+        task_id: TaskId,
+    },
     GetSettings,
     /// Assistant chat scoped to a task; replies arrive as transcript events.
-    AssistantMessage { task_id: TaskId, text: String },
+    AssistantMessage {
+        task_id: TaskId,
+        text: String,
+    },
     /// Replays stored events after `after_seq`, then streams live events.
-    Subscribe { after_seq: i64 },
+    Subscribe {
+        after_seq: i64,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -145,7 +216,11 @@ pub struct SettingsView {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "data", rename_all = "snake_case")]
 pub enum Response {
-    Hello { protocol: u16, server: String, uid: u32 },
+    Hello {
+        protocol: u16,
+        server: String,
+        uid: u32,
+    },
     Pong,
     Dashboard(Box<DashboardSnapshot>),
     Tasks(Paged<Task>),
@@ -169,7 +244,9 @@ pub enum Response {
     Report(Box<Report>),
     Settings(SettingsView),
     Accepted,
-    Subscribed { latest_seq: i64 },
+    Subscribed {
+        latest_seq: i64,
+    },
 }
 
 /// Encodes one frame as a single line (without the trailing newline).
@@ -216,7 +293,9 @@ mod tests {
         let frame = ClientFrame {
             v: PROTOCOL_VERSION,
             id: 9,
-            request: Request::ListTasks { page: Page::new(0, 20) },
+            request: Request::ListTasks {
+                page: Page::new(0, 20),
+            },
         };
         let line = encode(&frame).expect("encode");
         assert!(!line.contains('\n'));
@@ -242,7 +321,9 @@ mod tests {
         };
         let back = decode_server(&encode(&frame).expect("encode")).expect("decode");
         match back {
-            ServerFrame::Response { result: Err(err), .. } => {
+            ServerFrame::Response {
+                result: Err(err), ..
+            } => {
                 assert_eq!(CoreError::from(err).code(), ErrorCode::Denied)
             }
             other => panic!("unexpected {other:?}"),
