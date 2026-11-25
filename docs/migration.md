@@ -1,6 +1,6 @@
 # Running the Rust inspection console alongside ARTEX
 
-The `rust` branch introduces a PostgreSQL inspection console. Treat the Go application at `da50908c73b2b97b1a8dec843d3475e03780e1d4` as the authority for active deployments and writes. Its architecture and source paths are listed in the [compatibility matrix](compatibility.md).
+The Rust PostgreSQL inspection console runs alongside the Go application. The Go application continues to manage active deployments and database writes. The [compatibility matrix](compatibility.md) records the source baseline and the available read views.
 
 ## Isolate the database and process
 

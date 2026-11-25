@@ -2,8 +2,10 @@
 
 The daemon serves only read-only queries over a Linux Unix socket. Use an
 existing runtime directory owned by the daemon's effective UID and private to
-that user. The daemon creates the socket with mode 0600. Both sides verify the
-effective UID of their peers with Linux peer credentials. Any process running
+that user. Place it under a trusted path such as `$XDG_RUNTIME_DIR` whose
+ancestors cannot be replaced by other users. The daemon creates the socket
+with mode 0600. Both sides verify the effective UID of their peers with Linux
+peer credentials. Any process running
 under that UID can access the console. Run the daemon under the account you
 intend to authorize for local database inspection.
 

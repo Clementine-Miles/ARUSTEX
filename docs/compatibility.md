@@ -1,6 +1,6 @@
 # Compatibility and migration matrix
 
-The Go and Next.js baseline is `da50908c73b2b97b1a8dec843d3475e03780e1d4`. The local `legacy/go-nextjs` reference pins that commit. The Rust branch starts from the same snapshot and retains the original code while the read-only inspection console is verified independently.
+The Go and Next.js baseline is `da50908c73b2b97b1a8dec843d3475e03780e1d4`, pinned locally as `legacy/go-nextjs`. The read-only Rust inspection console runs alongside that application and has its own verification workflow.
 
 The ARTEX-Desktop reference was reviewed at `ad9a20c1f1ea46580b6624ebd40c192a2d388569`. Its workspace separates domain records, adapters, and contracts. Its native interface and bundled SQLite store have different deployment requirements. The Rust console uses its own contracts and PostgreSQL queries. See [ARTEX-Desktop](https://github.com/froiibn/ARTEX-Desktop/tree/ad9a20c1f1ea46580b6624ebd40c192a2d388569/desktop).
 
