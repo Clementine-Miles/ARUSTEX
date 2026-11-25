@@ -30,3 +30,14 @@ pub struct Report {
     pub created_at: DateTime<Utc>,
     pub finalized_at: Option<DateTime<Utc>>,
 }
+
+/// Summary row for report listings (no body).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ReportSummary {
+    pub id: ReportId,
+    pub task_id: TaskId,
+    pub title: String,
+    pub status: ReportStatus,
+    pub origin: Origin,
+    pub created_at: DateTime<Utc>,
+}

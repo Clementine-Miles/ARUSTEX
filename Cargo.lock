@@ -35,15 +35,25 @@ name = "arustex-app"
 version = "0.1.0"
 dependencies = [
  "arustex-core",
+ "arustex-llm",
+ "arustex-operations",
+ "arustex-policy",
+ "arustex-runtime",
  "arustex-store",
+ "async-trait",
  "chrono",
+ "reqwest",
  "serde",
  "serde_json",
+ "sqlx",
  "tempfile",
  "thiserror",
  "tokio",
+ "tokio-util",
  "toml",
  "tracing",
+ "uuid",
+ "wiremock",
 ]
 
 [[package]]

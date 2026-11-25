@@ -11,7 +11,7 @@ use crate::domain::asset::{Asset, AssetEdge};
 use crate::domain::exploration::ReviewCoverage;
 use crate::domain::finding::{Finding, FindingStatus, NoteSubject, ReviewNote, ReviewResult};
 use crate::domain::record::{Dataset, ImportedRecord};
-use crate::domain::report::Report;
+use crate::domain::report::{Report, ReportSummary};
 use crate::domain::task::{NewTask, Task, TaskAction};
 use crate::domain::work::{Approval, ApprovalStatus};
 use crate::domain::{
@@ -240,7 +240,7 @@ pub enum Response {
     ReviewResult(Box<ReviewResult>),
     Note(ReviewNote),
     Notes(Vec<ReviewNote>),
-    Reports(Paged<Report>),
+    Reports(Paged<ReportSummary>),
     Report(Box<Report>),
     Settings(SettingsView),
     Accepted,

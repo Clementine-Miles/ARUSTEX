@@ -274,8 +274,6 @@ pub struct LimitsConfig {
     pub max_record_body_bytes: usize,
     pub max_records_per_import: u64,
     pub attachment_max_bytes: u64,
-    pub operation_timeout_secs: u64,
-    pub max_operation_output_bytes: usize,
     pub record_retention_days: u32,
 }
 
@@ -286,8 +284,6 @@ impl Default for LimitsConfig {
             max_record_body_bytes: 512 * 1024,
             max_records_per_import: 1_000_000,
             attachment_max_bytes: 64 * 1024 * 1024,
-            operation_timeout_secs: 30,
-            max_operation_output_bytes: 64 * 1024,
             record_retention_days: 0,
         }
     }
@@ -384,14 +380,22 @@ pub struct Loaded {
 }
 
 fn is_loopback_http(url: &str) -> bool {
-    let rest = url.strip_prefix("http://").unwrap_or("");
-    let host = rest.split(['/', ':']).next().unwrap_or("");
-    matches!(host, "127.0.0.1" | "localhost" | "[") || rest.starts_with("[::1]")
+    let Some(rest) = url.strip_prefix("http://") else {
+        return false;
+    };
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    if authority.contains('@') {
+        return false;
+    }
+    let host = match authority.strip_prefix('[') {
+        Some(v6) => v6.split(']').next().unwrap_or(""),
+        None => authority.split(':').next().unwrap_or(""),
+    };
+    matches!(host, "127.0.0.1" | "localhost" | "::1")
 }
 
 fn check_endpoint(what: &str, url: &str) -> ConfigResult<()> {
-    if url.starts_with("https://") {
-        let host = &url[8..];
+    if let Some(host) = url.strip_prefix("https://") {
         if host.is_empty() || host.starts_with('/') || host.contains('@') {
             return Err(invalid(format!("{what}: invalid URL {url}")));
         }
@@ -895,5 +899,18 @@ mod tests {
                 .any(|(k, v)| k == "providers[0].api_key.env" && v == "ANTHROPIC_KEY")
         );
         assert!(entries.iter().all(|(_, v)| !v.starts_with("sk-")));
+    }
+
+    #[test]
+    fn plain_http_is_limited_to_loopback_hosts() {
+        assert!(is_loopback_http("http://127.0.0.1:8080/v1"));
+        assert!(is_loopback_http("http://localhost/v1"));
+        assert!(is_loopback_http("http://[::1]:9000"));
+        assert!(!is_loopback_http("http://[2001:db8::1]/v1"));
+        assert!(!is_loopback_http("http://127.0.0.1.example.com/v1"));
+        assert!(!is_loopback_http("http://localhost@example.com/v1"));
+        assert!(!is_loopback_http("https://localhost/v1"));
+        assert!(check_endpoint("x", "https://user@example.com").is_err());
+        assert!(check_endpoint("x", "http://example.com").is_err());
     }
 }

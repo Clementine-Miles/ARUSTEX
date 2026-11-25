@@ -9,17 +9,28 @@ publish.workspace = true
 
 [dependencies]
 arustex-core.workspace = true
+arustex-llm.workspace = true
+arustex-operations.workspace = true
+arustex-policy.workspace = true
+arustex-runtime.workspace = true
 arustex-store.workspace = true
+async-trait.workspace = true
 chrono.workspace = true
+reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+tokio-util.workspace = true
 toml.workspace = true
 tracing.workspace = true
+uuid.workspace = true
 
 [dev-dependencies]
+sqlx.workspace = true
 tempfile.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
+wiremock.workspace = true
 
 [lints]
 workspace = true

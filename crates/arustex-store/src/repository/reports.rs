@@ -1,9 +1,8 @@
 use arustex_core::domain::agent::SessionId;
-use arustex_core::domain::report::{Report, ReportStatus};
+use arustex_core::domain::report::Report;
 use arustex_core::domain::{Origin, ReportId, TaskId};
 use arustex_core::events::DomainEvent;
 use arustex_core::{CoreError, CoreResult, Page, Paged};
-use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
 use sqlx::postgres::PgRow;
@@ -29,16 +28,7 @@ fn report_from_row(row: &PgRow) -> CoreResult<Report> {
     })
 }
 
-/// Summary row for report listings (no body).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ReportSummary {
-    pub id: ReportId,
-    pub task_id: TaskId,
-    pub title: String,
-    pub status: ReportStatus,
-    pub origin: Origin,
-    pub created_at: DateTime<Utc>,
-}
+pub use arustex_core::domain::report::ReportSummary;
 
 /// One queued outbound notification.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

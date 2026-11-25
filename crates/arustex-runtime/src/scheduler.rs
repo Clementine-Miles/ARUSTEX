@@ -453,7 +453,8 @@ impl Scheduler {
         Ok(n)
     }
 
-    async fn prompt(&self, agent: &AgentDefinition, task: &Task) -> CoreResult<PromptRef> {
+    /// Renders the current prompt template of `agent` for `task`.
+    pub async fn prompt(&self, agent: &AgentDefinition, task: &Task) -> CoreResult<PromptRef> {
         let (version, body) = match self.store.latest_prompt_template(&agent.prompt_key).await? {
             Some(t) => (t.version, t.body),
             None => (0, default_prompt(agent.role)),
