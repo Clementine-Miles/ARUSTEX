@@ -145,10 +145,7 @@ impl Daemon {
     /// Builds the daemon. Refuses to start against an unmigrated database.
     pub async fn build(loaded: Loaded, shutdown: CancellationToken) -> CoreResult<Self> {
         let store = Arc::new(connect_store(&loaded).await?);
-        store
-            .ensure_migrated()
-            .await
-            .map_err(|e| CoreError::Unavailable(format!("{e}; run `arustex db migrate` first")))?;
+        store.ensure_migrated().await?;
         let cfg = &loaded.config;
         let router = build_router(&loaded)?;
         let agents = configured_agents(cfg);

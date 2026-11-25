@@ -30,7 +30,6 @@ arustex-runtime = { path = "crates/arustex-runtime" }
 arustex-app = { path = "crates/arustex-app" }
 arustex-tui = { path = "crates/arustex-tui" }
 
-anyhow = "1"
 async-trait = "0.1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
 clap = { version = "4.6", features = ["derive", "env"] }
